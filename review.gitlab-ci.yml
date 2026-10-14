@@ -1,0 +1,55 @@
+# Branch previews on the site hub. A site project uses this file directly:
+# Settings → CI/CD → General pipelines → CI/CD configuration file = review.gitlab-ci.yml@<group>/site-hub
+# so branches can't change the docker commands below. The repo needs a Dockerfile whose server listens on $PORT (3000).
+variables:
+  HUB_URL: "https://your-nas.example.org:4300" # your hub's address (README, step 6)
+  SITE: "site-$CI_PROJECT_PATH_SLUG-$CI_COMMIT_REF_SLUG"
+  SITE_PORT: "3000"
+
+hub:deploy:
+  stage: deploy
+  tags: [site-hub]
+  image: docker:27-cli
+  rules:
+    - if: $CI_COMMIT_BRANCH
+  script:
+    - OLD=$(docker image inspect -f "{{.Id}}" "$SITE" 2>/dev/null || true)
+    - docker build --pull -t "$SITE" .
+    - docker rm -f "$SITE" 2>/dev/null || true
+    # Project CI/CD variables named SITE_ENV_<NAME> reach the site as <NAME>; written after the build so no secret is baked into the image.
+    - >-
+      for v in $(env | grep -oE '^SITE_ENV_[A-Za-z0-9_]+=' | tr -d = | sort -u); do
+      printenv "$v" >/dev/null && printf '%s=%s\n' "${v#SITE_ENV_}" "$(printenv "$v")";
+      done > site.env || true
+    # Sites get no host mounts, no capabilities and capped resources; they only join the hub network.
+    - >-
+      docker run -d --name "$SITE" --network sites --restart unless-stopped
+      --memory 1g --cpu-shares 512 --pids-limit 512 --cap-drop ALL --security-opt no-new-privileges
+      -e PORT="$SITE_PORT" --env-file site.env
+      --label hub.site=1 --label hub.port="$SITE_PORT"
+      --label hub.project="$CI_PROJECT_PATH" --label hub.branch="$CI_COMMIT_REF_NAME"
+      --label hub.commit="$CI_COMMIT_SHORT_SHA" --label hub.title="$CI_COMMIT_TITLE"
+      --label hub.author="$CI_COMMIT_AUTHOR" --label hub.url="$CI_PROJECT_URL/-/commit/$CI_COMMIT_SHA"
+      "$SITE"
+    - if [ -n "$OLD" ] && [ "$OLD" != "$(docker image inspect -f "{{.Id}}" "$SITE")" ]; then docker rmi "$OLD" || true; fi
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    url: $HUB_URL/_hub/open/$SITE
+    on_stop: hub:stop
+
+hub:stop:
+  stage: deploy
+  tags: [site-hub]
+  image: docker:27-cli
+  variables:
+    GIT_STRATEGY: none # the branch may already be deleted
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+  allow_failure: true
+  script:
+    - docker rm -f "$SITE" || true
+    - docker rmi "$SITE" || true
+  environment:
+    name: review/$CI_COMMIT_REF_SLUG
+    action: stop

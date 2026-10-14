@@ -1,0 +1,46 @@
+# Run on the NAS: sudo docker compose up -d --build
+name: site-hub
+services:
+  router:
+    build: .
+    ports: ["${HUB_PORT:-4300}:8080"]
+    environment:
+      HUB_URL: ${HUB_URL:-}
+      HUB_ORG: ${HUB_ORG:-}
+      HUB_PASSWORD: ${HUB_PASSWORD:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      # GitLab OAuth app (scope api, redirect <hub>/_hub/gitlab) for the Remove button; unset = no Remove.
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID:-}
+      GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET:-}
+      DOCKER_API: http://docker:2375
+    # DSM's default certificate (root-only files, so run as uid 0 but with no capabilities).
+    volumes: ["/usr/syno/etc/certificate/system/default:/certs:ro"]
+    user: "0"
+    cap_drop: [ALL]
+    networks: [sites, internal]
+    restart: unless-stopped
+
+  # Read-only window onto Docker: the router may list containers and read their logs, nothing else.
+  docker:
+    image: tecnativa/docker-socket-proxy:0.3
+    environment: { CONTAINERS: 1 }
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [internal]
+    restart: unless-stopped
+
+  # Dedicated runner for review.gitlab-ci.yml: its jobs get the Docker socket, so it only takes
+  # jobs tagged site-hub from projects it's enabled for. Registered once, see README step 4.
+  runner:
+    image: gitlab/gitlab-runner:latest
+    volumes:
+      - ./runner:/etc/gitlab-runner
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+networks:
+  sites: { name: sites }          # CI attaches every site container here
+  internal: { internal: true }
