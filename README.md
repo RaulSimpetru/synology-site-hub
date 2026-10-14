@@ -155,6 +155,8 @@ All settings live in `.env` on the NAS; [`.env.example`](.env.example) lists the
 2. In the project, go to Settings → CI/CD → General pipelines, and set the **CI/CD configuration file** to `https://your-nas:4300/_hub/ci.yml`. The hub serves the build template there with its own address filled in. Don't add a `.gitlab-ci.yml` of your own.
 3. With a project runner (not a group runner): Settings → CI/CD → Runners → **enable the `site-hub` runner**.
 
+> **Self-hosted GitLab on the same network** blocks fetching from local addresses by default. Allow the hub's host and port only: Admin → Settings → Network → Outbound requests → add `your-nas.example.org:4300` to the allowlist.
+>
 > If GitLab can't fetch the template from the hub (no network path, or a self-signed certificate), put [`review.gitlab-ci.yml`](review.gitlab-ci.yml) in a GitLab project of its own, set its `HUB_URL`, and use `review.gitlab-ci.yml@<group>/<project>` instead.
 
 Then push a branch. It appears at `https://your-nas:4300/<repo>/<branch>/` (the branch name as GitLab slugs it, e.g. `feature/x` → `feature-x`). The pipeline's environment URL leads there too.
