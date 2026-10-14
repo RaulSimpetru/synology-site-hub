@@ -179,8 +179,10 @@ const score = (hay, word) => {
   return best;
 };
 const rows = [...document.querySelectorAll("section ol>li")].map((li, i) => ({ li, i, hay: (li.closest("section").querySelector("h2").textContent + " " + li.textContent).toLowerCase().replace(/\\s+/g, " ") }));
-find.oninput = () => {
-  const words = find.value.trim().toLowerCase().split(/\\s+/).filter(Boolean);
+// Not the global "find": that name is window.find(), a built-in browser function.
+const search = document.getElementById("find");
+search.oninput = () => {
+  const words = search.value.trim().toLowerCase().split(/\\s+/).filter(Boolean);
   for (const r of rows) {
     const s = words.map((w) => score(r.hay, w));
     r.rank = s.some((x) => x < 0) ? -1 : s.reduce((a, b) => a + b, 0);
