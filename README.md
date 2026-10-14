@@ -66,7 +66,7 @@ DSM has no git, so copy the files from your computer. `-O` is needed because DSM
 
 ```sh
 ssh you@your-nas 'mkdir -p /volume1/docker/site-hub'
-scp -O router.ts Dockerfile compose.yaml .env.example you@your-nas:/volume1/docker/site-hub/
+scp -O router.ts og.png Dockerfile compose.yaml .env.example you@your-nas:/volume1/docker/site-hub/
 ```
 
 </details>
@@ -174,7 +174,7 @@ Then push a branch. It appears at `https://your-nas:4300/<repo>/<branch>/` (the 
 ## Development
 
 - **Tests:** `bun test`.
-- **Update a running hub:** copy the new `router.ts` (and `compose.yaml` if it changed) to the NAS, then run `sudo docker compose up -d --build router`.
+- **Update a running hub:** copy the new `router.ts` (and `compose.yaml`, `Dockerfile` or `og.png` if they changed) to the NAS, then run `sudo docker compose up -d --build router`.
 - **Project page:** `docs/` is the GitHub Pages site, served from `main` / `docs`. `docs/demo.html` is the real hub page with made-up sites; rebuild it after changing `router.ts` with `bun scripts/demo.ts`.
 
 ## Licence

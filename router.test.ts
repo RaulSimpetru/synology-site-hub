@@ -196,3 +196,12 @@ test("chat apps get a preview card built from the address, not the login page", 
   // People still go to sign-in.
   expect((await get("/emg-website/main/")).status).toBe(302);
 });
+
+test("the preview picture is public and the card points at it", async () => {
+  const img = await handle(new Request("http://hub.test/_hub/og.png"));
+  expect(img.status).toBe(200);
+  expect(img.headers.get("content-type")).toBe("image/png");
+  expect((await img.arrayBuffer()).byteLength).toBeGreaterThan(1000);
+  const card = await (await handle(new Request("http://hub.test/r/b/", { headers: { "user-agent": "WhatsApp/2" } }))).text();
+  expect(card).toContain('<meta property="og:image" content="http://hub.test/_hub/og.png">');
+});

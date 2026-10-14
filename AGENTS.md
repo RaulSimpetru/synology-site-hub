@@ -36,4 +36,4 @@ Wait for `"status":"success"`, then open the preview link.
 
 - `router.ts` is the proxy, login and hub page; `router.test.ts` has its tests (`bun test`).
 - `compose.yaml` runs the router, a read-only Docker API proxy and the runner in `/volume1/docker/site-hub` on the NAS. Settings live in `.env` there (`.env.example` lists them).
-- DSM has no git: copy `router.ts` (and `compose.yaml` if changed) with `scp -O`, then run `sudo docker compose up -d --build router` in that folder. Changes to `review.gitlab-ci.yml` apply on each site's next pipeline.
+- DSM has no git: copy `router.ts` (and `compose.yaml`, `Dockerfile` or `og.png` if changed) with `scp -O`, then run `sudo docker compose up -d --build router` in that folder. Changes to `review.gitlab-ci.yml` apply on each site's next pipeline.

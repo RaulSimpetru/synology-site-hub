@@ -438,11 +438,14 @@ function previewCard(url: URL) {
   return new Response(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:site_name" content="${esc(ORG || "Site hub")}"><meta property="og:type" content="website"><meta property="og:url" content="${esc(OIDC.hub + url.pathname)}">
-<meta name="twitter:card" content="summary"><meta name="description" content="${esc(desc)}"></head><body>${esc(title)}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+<meta property="og:image" content="${esc(OIDC.hub)}/_hub/og.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Site hub: every git branch, live, on your own NAS"><meta name="twitter:card" content="summary_large_image"><meta name="description" content="${esc(desc)}"></head><body>${esc(title)}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
 export async function handle(req: Request) {
   const url = new URL(req.url);
+  // The preview picture is the same for every link and says nothing about any site, so it needs no login.
+  if (url.pathname === "/_hub/og.png") return new Response(Bun.file(new URL("./og.png", import.meta.url).pathname), { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
   if (req.method === "GET" && PREVIEW_BOTS.test(req.headers.get("user-agent") ?? "") && !sessionUser(req)) return previewCard(url);
   let user: string | undefined;
   if (SSO) {
