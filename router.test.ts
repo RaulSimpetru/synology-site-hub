@@ -184,3 +184,15 @@ test("search only indexes site rows, not the Remove dialog's bullet points", asy
   const page = await (await get("/_hub", setCookies(await signIn()) + "; hub_gl=none")).text();
   expect(page).toContain('querySelectorAll("section ol>li")');
 });
+
+test("chat apps get a preview card built from the address, not the login page", async () => {
+  const bot = (path: string) => handle(new Request(`http://hub.test${path}`, { headers: { "user-agent": "WhatsApp/2.23.20.0 A" } }));
+  const card = await (await bot("/emg-website/main/")).text();
+  expect(card).toContain('<meta property="og:title" content="emg-website · main">');
+  expect(card).toContain("Sign in with your NAS account");
+  expect(await (await bot("/_hub")).text()).toContain('content="Site hub"');
+  // Only what's in the URL: no site list, no commit titles.
+  expect(card).not.toContain("127.0.0.1");
+  // People still go to sign-in.
+  expect((await get("/emg-website/main/")).status).toBe(302);
+});

@@ -427,8 +427,23 @@ async function remove(req: Request, name: string) {
   return new Response(null, { status: 303, headers: { location: "/_hub" } });
 }
 
+// Chat apps fetch a link to show a preview, without signing in. Give them a card built only from the
+// address itself (repo and branch are in the URL anyway) instead of the NAS login page.
+const PREVIEW_BOTS = /WhatsApp|facebookexternalhit|Facebot|Twitterbot|Slackbot|TelegramBot|Discordbot|LinkedInBot|SkypeUriPreview|Teams|Mattermost|redditbot|Applebot|Iframely|Embedly/i;
+function previewCard(url: URL) {
+  const [repo, branch] = url.pathname.split("/").filter(Boolean);
+  const where = ORG ? `the site hub of ${ORG}` : "a private site hub";
+  const title = repo && branch && !repo.startsWith("_") ? `${repo} · ${branch}` : "Site hub";
+  const desc = repo && branch && !repo.startsWith("_") ? `A live preview on ${where}. Sign in with your NAS account to open it.` : `Live previews of every git branch, on ${where}.`;
+  return new Response(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}">
+<meta property="og:site_name" content="${esc(ORG || "Site hub")}"><meta property="og:type" content="website"><meta property="og:url" content="${esc(OIDC.hub + url.pathname)}">
+<meta name="twitter:card" content="summary"><meta name="description" content="${esc(desc)}"></head><body>${esc(title)}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
 export async function handle(req: Request) {
   const url = new URL(req.url);
+  if (req.method === "GET" && PREVIEW_BOTS.test(req.headers.get("user-agent") ?? "") && !sessionUser(req)) return previewCard(url);
   let user: string | undefined;
   if (SSO) {
     if (url.pathname === "/_hub/callback") return callback(req);
