@@ -14,11 +14,11 @@
 
 ---
 
-Want to share a project wiki, a demo or a paper page with your colleagues, without putting it on the public internet? Push a branch that has a `Dockerfile`. About two minutes later it's live at `https://your-nas:4300` for everyone in your group. Every push updates it, and deleting the branch takes it down.
+Want to share a project wiki, a demo or a paper page with your colleagues, without putting it on the public internet? Push a branch that has a `Dockerfile`. About two minutes later it's live at `https://your-nas:4300/<repo>/<branch>/` for everyone in your group. Every push updates it, and deleting the branch takes it down.
 
 - **Your NAS accounts.** People sign in through DSM's SSO Server, or with a shared password.
 - **Fuzzy search.** Every running branch, grouped by project; type `rv2` to find `reviewer-2`.
-- **Shareable links.** Each preview gets a link, and a small "← All sites" badge back to the list.
+- **A link for every page.** Each site lives at `/<repo>/<branch>/`, so any page can be shared, and several sites work side by side in tabs. A small "← All sites" badge leads back to the list.
 - **Remove.** Only shown to people who can push to that branch; GitLab checks and records it.
 - **Isolated sites.** No host mounts, no Linux capabilities, 1 GB of RAM each.
 - **Small.** One TypeScript file on Bun, with tests.
@@ -34,7 +34,7 @@ flowchart LR
 ```
 
 - **GitLab CI** builds each branch on a runner on the NAS and starts it as a container. Projects point at this repo's `review.gitlab-ci.yml`.
-- **The hub** (`router.ts`) lists the running containers through a read-only Docker API and proxies your browser to the one you pick.
+- **The hub** (`router.ts`) lists the running containers through a read-only Docker API and serves each one under its own path, rewriting the site's root-relative links to match.
 - **Removing** a preview stops its GitLab environment, which runs the template's stop job.
 
 ## What you need
@@ -155,13 +155,13 @@ All settings live in `.env` on the NAS; [`.env.example`](.env.example) lists the
 2. In the project, go to Settings → CI/CD → General pipelines, and set the **CI/CD configuration file** to `review.gitlab-ci.yml@<group>/site-hub`. Don't add a `.gitlab-ci.yml` of your own.
 3. In the project, go to Settings → CI/CD → Runners, and **enable the `site-hub` runner**.
 
-Then push a branch. Its link, `https://your-nas:4300/_hub/open/site-<project>-<branch>`, also appears as the pipeline's environment URL.
+Then push a branch. It appears at `https://your-nas:4300/<repo>/<branch>/` (the branch name as GitLab slugs it, e.g. `feature/x` → `feature-x`). The pipeline's environment URL leads there too.
 
 > **Secrets:** add a CI/CD variable `SITE_ENV_<NAME>` (masked, not protected). The site receives it as `<NAME>`, so `SITE_ENV_SMTP_PASS` becomes `SMTP_PASS`. It's written after `docker build`, so it never ends up in the image.
 
 ## Limits
 
-- **One site per browser at a time.** The chosen site lives in a cookie; use a private window to compare two side by side.
+- **Sites are served under a path.** Plain links, images, forms and redirects are rewritten automatically, and URLs that a site's JavaScript builds are routed by the page that asked for them. A single-page app with its own router may need its base path set; the hub sends it as the `X-Forwarded-Prefix` header.
 - **No WebSockets** through the hub.
 - **No persistent storage.** Whatever a site writes to disk is gone on its next deploy, so send data elsewhere, for example by email.
 - **CPU priority, not a cap.** The Synology kernel can't hard-limit CPU, so sites get a lower priority instead.

@@ -4,7 +4,7 @@ The hub shows one live preview per git branch of every connected website, on a S
 
 ## Add a version of an existing site
 
-Push a branch. CI deploys it in about 2 minutes, every push updates it, and deleting the branch removes it. The preview link is `<HUB_URL>/_hub/open/site-<project-path-slug>-<branch-slug>`, also the pipeline's GitLab environment URL.
+Push a branch. CI deploys it in about 2 minutes, every push updates it, and deleting the branch removes it. The site lives at `<HUB_URL>/<repo>/<branch-slug>/` (`/<group>/<repo>/<branch-slug>/` if two groups share a repo name); the pipeline's environment URL (`/_hub/open/<container>`) redirects there.
 
 ## Add a new website (another GitLab repo)
 
@@ -20,7 +20,7 @@ Steps 2 and 3 are GitLab settings: ask the user, or use `glab api` if you have p
 - **Secrets:** the user adds a CI/CD variable `SITE_ENV_<NAME>` (masked, not protected); the container gets `<NAME>`. Never put secrets in the repo, the Dockerfile or commit messages, and don't print them.
 - **No persistent storage:** what a site writes to disk is lost on the next deploy.
 - **No WebSockets** through the hub.
-- **Hub root:** typing or bookmarking it shows the site list; after `/_hub/open/<site>`, the `hub_site` cookie routes every path to that site. Share `/_hub/open/<site>` links.
+- **Paths:** sites are served under their path, and root-relative links, `src`, forms and redirects are rewritten. URLs a site builds in JavaScript are routed by their referer, else by the `hub_site` cookie (last site opened). SPAs with their own router may need `X-Forwarded-Prefix` as their base path.
 - **Remove button:** needs `GITLAB_URL`, `GITLAB_CLIENT_ID` and `GITLAB_CLIENT_SECRET`. It shows only where GitLab says the person can push to the branch, and stops the `review/<slug>` environment as them.
 - **Don't read the runner's config or probe the NAS's ports:** that is credential exploration.
 

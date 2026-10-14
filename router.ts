@@ -1,5 +1,5 @@
-// Site picker: lists the site containers that GitLab CI started (label hub.site) and
-// proxies the whole browser to the one picked, remembered in a cookie.
+// Site hub: lists the site containers that GitLab CI started (label hub.site) and serves each one
+// under its own path, /<repo>/<branch>/, so every page of every site has a link of its own.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const DOCKER = process.env.DOCKER_API ?? "http://docker:2375";
@@ -19,7 +19,7 @@ const SESSION_KEY = process.env.SESSION_SECRET || randomBytes(32).toString("hex"
 const SESSION_MS = 12 * 3600_000;
 const SECURE = OIDC.hub.startsWith("https:") ? "; Secure" : "";
 
-type Site = { name: string; state: string; status: string; created: number; labels: Record<string, string> };
+type Site = { name: string; state: string; status: string; created: number; labels: Record<string, string>; path: string };
 
 let cache: { at: number; sites: Map<string, Site>; error?: string } = { at: 0, sites: new Map() };
 
@@ -32,13 +32,24 @@ export async function listSites(force = false) {
     const sites = new Map<string, Site>();
     for (const c of (await res.json()) as any[]) {
       const name = String(c.Names?.[0] ?? "").replace(/^\//, "");
-      sites.set(name, { name, state: c.State, status: c.Status, created: c.Created * 1000, labels: c.Labels ?? {} });
+      sites.set(name, { name, state: c.State, status: c.Status, created: c.Created * 1000, labels: c.Labels ?? {}, path: "" });
+    }
+    // /<repo>/<branch>, or /<group>/<repo>/<branch> when two groups have a repo of the same name.
+    const repo = (s: Site) => (s.labels["hub.project"] ?? s.name).split("/").pop()!;
+    for (const s of sites.values()) {
+      const clash = [...sites.values()].some((o) => repo(o) === repo(s) && o.labels["hub.project"] !== s.labels["hub.project"]);
+      s.path = `/${clash ? s.labels["hub.project"] : repo(s)}/${refSlug(s.labels["hub.branch"] ?? s.name)}`;
     }
     cache = { at: Date.now(), sites };
   } catch (error) {
     cache = { ...cache, at: Date.now(), error: String(error) }; // keep the last good list
   }
   return cache;
+}
+
+// GitLab's CI_COMMIT_REF_SLUG: names the review/<slug> environment and the site's path.
+function refSlug(ref: string) {
+  return ref.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 }
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -71,7 +82,7 @@ export async function hubPage(current?: string, user?: string, glToken?: string)
     <p>${esc(l["hub.title"])}</p>
     <small>${esc(l["hub.author"]?.replace(/\s*<.*>$/, ""))} · <a class="mono" href="${esc(l["hub.url"])}">${esc(l["hub.commit"])}</a> · <a href="/_hub/logs/${esc(s.name)}">logs</a></small></div>
   <span class="age">${ago(s.created)}</span>
-  <span class="acts">${removing.has(s.name) ? '<span class="down">Removing…</span>' : up ? `<a class="open" href="/_hub/open/${esc(s.name)}">Open →</a>` : `<span class="down">${esc(s.status)}</span>`}
+  <span class="acts">${removing.has(s.name) ? '<span class="down">Removing…</span>' : up ? `<a class="open" href="${esc(s.path)}/">Open →</a>` : `<span class="down">${esc(s.status)}</span>`}
   ${removable.has(s.name) && !removing.has(s.name) ? `<button type="button" class="rm" data-site="${esc(s.name)}" data-branch="${esc(l["hub.branch"])}" data-project="${esc(l["hub.project"])}">Remove</button>` : ""}</span>
 </li>`;
   }).join("\n")}</ol></section>`).join("\n");
@@ -219,21 +230,22 @@ export function badge(site: Site) {
     + `<span style="${box};display:flex;align-items:center;padding:12px 14px;font:13px/1 ui-monospace,Menlo,monospace;white-space:nowrap">${esc(l["hub.project"]?.split("/").pop())} / ${esc(l["hub.branch"])}</span></div>`;
 }
 
-async function proxy(req: Request, site: Site) {
+async function proxy(req: Request, site: Site, path: string) {
   const url = new URL(req.url);
   const upstream = `http://${site.name}:${site.labels["hub.port"] || "3000"}`;
   const headers = new Headers(req.headers);
   headers.delete("host");
   headers.delete("authorization"); // the hub password is not the site's business
-  const kept = (headers.get("cookie") ?? "").split(/;\s*/).filter((c) => c && !/^hub_(session|state|opened|gl|glstate)=/.test(c)).join("; ");
+  const kept = (headers.get("cookie") ?? "").split(/;\s*/).filter((c) => c && !/^hub_(session|state|gl|glstate)=/.test(c)).join("; ");
   if (kept) headers.set("cookie", kept);
   else headers.delete("cookie"); // nor is the hub session
   headers.delete("accept-encoding"); // ask for plain bodies so we can rewrite HTML
   headers.set("x-forwarded-host", url.host);
   headers.set("x-forwarded-proto", url.protocol.slice(0, -1));
+  headers.set("x-forwarded-prefix", site.path);
   let res: Response;
   try {
-    res = await fetch(upstream + url.pathname + url.search, {
+    res = await fetch(upstream + path + url.search, {
       method: req.method,
       headers,
       body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
@@ -246,12 +258,26 @@ async function proxy(req: Request, site: Site) {
   out.delete("content-encoding");
   out.delete("content-length");
   const location = out.get("location");
-  if (location?.startsWith(upstream)) out.set("location", location.slice(upstream.length) || "/");
-  // Every site answers on the same URLs, picked by the hub_site cookie, so a cached "/" from one site must not be shown for another.
+  const local = location?.startsWith(upstream) ? location.slice(upstream.length) || "/" : location;
+  if (local) out.set("location", prefixed(site, local));
+  // Root-relative requests fall back to the hub_site cookie when there is no referer, so keep caches apart per site.
   out.append("vary", "cookie");
+  if (req.headers.get("sec-fetch-mode") === "navigate") out.append("set-cookie", `${COOKIE}=${site.name}; Path=/; SameSite=Lax; HttpOnly${SECURE}`);
   const response = new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
   if (!out.get("content-type")?.startsWith("text/html")) return response;
-  return new HTMLRewriter().on("body", { element: (el) => { el.append(badge(site), { html: true }); } }).transform(response);
+  // Sites are written for "/", so point their root-relative links at the site's own path.
+  const fix = (attr: string) => ({ element: (el: HTMLRewriterTypes.Element) => {
+    const v = el.getAttribute(attr);
+    if (v) el.setAttribute(attr, attr === "srcset" ? v.replace(/(^|,\s*)(\/[^\s,]*)/g, (_, sep, u) => sep + prefixed(site, u)) : prefixed(site, v));
+  } });
+  const rw = new HTMLRewriter().on("body", { element: (el) => { el.append(badge(site), { html: true }); } });
+  for (const attr of ["href", "src", "action", "formaction", "poster", "srcset"]) rw.on(`[${attr}]`, fix(attr));
+  return rw.transform(response);
+}
+
+// "/x" on a site becomes "/<repo>/<branch>/x"; other links (relative, other hosts, "//cdn…") stay as they are.
+function prefixed(site: Site, link: string) {
+  return link.startsWith("/") && !link.startsWith("//") && !link.startsWith(site.path + "/") && link !== site.path ? site.path + link : link;
 }
 
 const readCookie = (req: Request, name: string) =>
@@ -339,7 +365,6 @@ const gl = (token: string, path: string, method = "GET") =>
   fetch(`${GL.url}/api/v4/${path}`, { method, headers: { authorization: `Bearer ${token}` } });
 const glProject = (s: Site) => encodeURIComponent(s.labels["hub.project"] ?? "");
 // GitLab's CI_COMMIT_REF_SLUG, which names the review/<slug> environment.
-const refSlug = (ref: string) => ref.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 
 const pushCache = new Map<string, { at: number; ok: boolean }>();
 async function canRemove(token: string, s: Site, fresh = false) {
@@ -426,13 +451,11 @@ export async function handle(req: Request) {
   if (GITLAB && url.pathname === "/_hub/gitlab/login") return glLogin();
   const rm = url.pathname.match(/^\/_hub\/remove\/([\w.-]+)$/);
   if (GITLAB && rm) return remove(req, rm[1]);
+  // Old-style links (and GitLab's environment URL) still work: they go to the site's own path.
   const open = url.pathname.match(/^\/_hub\/open\/([\w.-]+)$/);
   if (open) {
-    if (!(await listSites(true)).sites.has(open[1])) return new Response("No such site", { status: 404 });
-    const headers = new Headers({ location: "/" });
-    headers.append("set-cookie", `${COOKIE}=${open[1]}; Path=/; SameSite=Lax; HttpOnly${SECURE}`);
-    headers.append("set-cookie", `hub_opened=1; Path=/; Max-Age=10; SameSite=Lax; HttpOnly${SECURE}`); // the redirect below also looks typed
-    return new Response(null, { status: 302, headers });
+    const s = (await listSites(true)).sites.get(open[1]);
+    return s ? new Response(null, { status: 302, headers: { location: s.path + "/" } }) : new Response("No such site", { status: 404 });
   }
   const logs = url.pathname.match(/^\/_hub\/logs\/([\w.-]+)$/);
   if (logs) {
@@ -441,16 +464,24 @@ export async function handle(req: Request) {
     return new Response(demux(new Uint8Array(await res.arrayBuffer())), { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
 
-  // Typing or bookmarking the hub address shows the site list rather than the last site opened.
-  // Browsers mark a reload the same way but add cache-control, so reloading a site's home page stays on it.
-  const typed = req.headers.get("sec-fetch-site") === "none" && req.headers.get("sec-fetch-mode") === "navigate" && !req.headers.has("cache-control") && !readCookie(req, "hub_opened");
-  if (url.pathname === "/" && typed) {
-    return new Response(null, { status: 302, headers: { location: "/_hub" } });
+  // Only names the Docker API listed are ever proxied to, so no URL or cookie can point us anywhere else.
+  const { sites } = await listSites();
+  const under = (p: string) => [...sites.values()].find((s) => p === s.path || p.startsWith(s.path + "/"));
+  const site = under(url.pathname);
+  if (site) {
+    if (url.pathname === site.path) return new Response(null, { status: 301, headers: { location: site.path + "/" + url.search } });
+    return proxy(req, site, url.pathname.slice(site.path.length));
   }
-  // Only names the Docker API listed are ever proxied to, so the cookie can't point us anywhere else.
-  const site = current ? (await listSites()).sites.get(current) : undefined;
-  if (!site) return new Response(null, { status: 302, headers: { location: "/_hub" } });
-  return proxy(req, site);
+  // A root-relative URL the HTML rewrite couldn't reach (built by the site's JavaScript or CSS): the page that
+  // asked for it says which site it belongs to; failing that, the site this browser last opened.
+  const referer = req.headers.get("referer");
+  const from = referer && new URL(referer).host === url.host ? under(new URL(referer).pathname) : undefined;
+  if (url.pathname === "/" && !from) return new Response(null, { status: 302, headers: { location: "/_hub" } });
+  const target = from ?? (current ? sites.get(current) : undefined);
+  if (!target) return new Response(null, { status: 302, headers: { location: "/_hub" } });
+  // Pages move to their proper address, so what the address bar shows can be shared.
+  if (req.headers.get("sec-fetch-mode") === "navigate") return new Response(null, { status: 302, headers: { location: target.path + url.pathname + url.search } });
+  return proxy(req, target, url.pathname);
 }
 
 if (import.meta.main) {

@@ -37,7 +37,12 @@ const gitlab = Bun.serve({
     return new Response("?", { status: 404 });
   },
 });
-const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => new Response(`cookies=${req.headers.get("cookie")}`) });
+const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
+  const url = new URL(req.url);
+  if (url.pathname === "/page") return new Response('<html><body><a href="/about">a</a><img src="/img.png" srcset="/s.png 1x, /l.png 2x"><a href="https://x.org/">x</a><a href="//cdn.x/y">c</a><a href="rel">r</a><form action="/send"></form></body></html>', { headers: { "content-type": "text/html" } });
+  if (url.pathname === "/old") return new Response(null, { status: 302, headers: { location: "/new" } });
+  return new Response(`path=${url.pathname} prefix=${req.headers.get("x-forwarded-prefix")} cookies=${req.headers.get("cookie")}`);
+} });
 const docker = Bun.serve({
   port: 0,
   fetch: () => Response.json([{ Names: ["/127.0.0.1"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": String(site.port), "hub.project": "g/p", "hub.branch": "main" } },
@@ -93,32 +98,44 @@ test("no open redirect after login", async () => {
 });
 
 test("the hub session cookie is not forwarded to sites", async () => {
-  let session = setCookies(await signIn());
-  const open = await get("/_hub/open/127.0.0.1", session);
-  session += "; " + setCookies(open) + "; theme=dark";
-  const body = await (await get("/", session)).text();
+  const session = setCookies(await signIn()) + "; theme=dark";
+  const body = await (await get("/p/main/", session)).text();
   expect(body).toContain("theme=dark");
   expect(body).not.toContain("hub_session");
 });
 
 test("proxied responses vary on the cookie, so switching sites skips the browser cache", async () => {
   const session = setCookies(await signIn());
-  const open = await get("/_hub/open/127.0.0.1", session);
-  const res = await get("/", session + "; " + setCookies(open));
+  const res = await get("/p/main/", session);
   expect(res.headers.get("vary")?.toLowerCase()).toContain("cookie");
 });
 
-test("typing the hub address shows the site list, links inside a site still reach it", async () => {
+test("each site lives at /<repo>/<branch>/, and old /_hub/open links lead there", async () => {
   const session = setCookies(await signIn());
-  const cookie = session + "; " + setCookies(await get("/_hub/open/127.0.0.1", session));
-  const nav = (site: string, extra = {}) => handle(new Request("http://hub.test/", { headers: { cookie, "sec-fetch-site": site, "sec-fetch-mode": "navigate", ...extra } }));
-  expect((await nav("none", { "cache-control": "max-age=0" })).status).toBe(200); // reload
-  expect((await nav("same-origin")).status).toBe(200);
-  expect((await nav("cross-site")).status).toBe(200); // a /_hub/open link from chat or email
-  const pasted = (site: string) => handle(new Request("http://hub.test/", { headers: { cookie: cookie.replace(/; hub_opened=1/, ""), "sec-fetch-site": site, "sec-fetch-mode": "navigate" } }));
-  expect(cookie).toContain("hub_opened=1");
-  expect((await nav("none")).status).toBe(200); // a /_hub/open link pasted into the address bar
-  expect((await pasted("none")).headers.get("location")).toBe("/_hub");
+  expect((await get("/_hub/open/127.0.0.1", session)).headers.get("location")).toBe("/p/main/");
+  expect((await get("/p/main", session)).headers.get("location")).toBe("/p/main/");
+  expect(await (await get("/p/main/deep/page?q=1", session)).text()).toContain("path=/deep/page prefix=/p/main");
+  expect((await get("/", session)).headers.get("location")).toBe("/_hub");
+  expect(await (await get("/_hub", session + "; hub_gl=none")).text()).toContain('href="/p/main/"');
+});
+
+test("a site's root-relative links and redirects point at its own path", async () => {
+  const session = setCookies(await signIn());
+  const html = await (await get("/p/main/page", session)).text();
+  for (const want of ['href="/p/main/about"', 'src="/p/main/img.png"', 'srcset="/p/main/s.png 1x, /p/main/l.png 2x"', 'action="/p/main/send"', 'href="https://x.org/"', 'href="//cdn.x/y"', 'href="rel"', 'href="/_hub"'])
+    expect(html).toContain(want);
+  expect((await get("/p/main/old", session)).headers.get("location")).toBe("/p/main/new");
+});
+
+test("root-relative requests from a site's own script reach that site", async () => {
+  const session = setCookies(await signIn());
+  const req = (path: string, headers: Record<string, string>) => handle(new Request(`http://hub.test${path}`, { headers: { cookie: session, ...headers } }));
+  expect(await (await req("/api/data", { referer: "http://hub.test/p/main/page" })).text()).toContain("path=/api/data");
+  const nav = await req("/control", { referer: "http://hub.test/p/main/page", "sec-fetch-mode": "navigate" });
+  expect(nav.headers.get("location")).toBe("/p/main/control");
+  expect((await req("/api/data", { referer: "http://evil.test/p/main/" })).headers.get("location")).toBe("/_hub");
+  // No referer: the site this browser last opened.
+  expect(await (await req("/api/data", { cookie: session + "; hub_site=127.0.0.1" })).text()).toContain("path=/api/data");
 });
 
 test("Remove shows only where GitLab says you can push, and stops the environment as you", async () => {

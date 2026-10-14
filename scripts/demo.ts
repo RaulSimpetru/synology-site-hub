@@ -19,7 +19,8 @@ Object.assign(process.env, {
   DOCKER_API: `http://localhost:${docker.port}`, HUB_URL: "https://your-nas.example.org:4300", HUB_ORG: "Example Lab",
   GITLAB_URL: `http://localhost:${gitlab.port}`, GITLAB_CLIENT_ID: "demo", GITLAB_CLIENT_SECRET: "demo", OIDC_CLIENT_ID: "",
 });
-const { hubPage, badge } = await import("../router");
+const { hubPage, badge, listSites } = await import("../router");
+const live = (await listSites(true)).sites;
 
 const DEMO = `<div class="demo-note" style="position:sticky;top:0;z-index:5;background:#000;color:#FFE14D;font:700 13px 'Space Mono',monospace;padding:10px 16px;text-align:center">
 DEMO with made-up sites. Nothing here is real: search, open a site, or try Remove. <a href="./" style="color:#fff">← Back to the explanation</a></div>`;
@@ -37,11 +38,11 @@ rmdlg.querySelector("form").onsubmit = (e) => {
 
 let html = await (await hubPage("site-example-lab-paper-companion-main", "you", "demo-token")).text();
 html = html
-  .replaceAll('href="/_hub/open/', 'href="sites/').replace(/href="sites\/([\w.-]+)"/g, 'href="sites/$1.html"')
   .replaceAll('href="/_hub/logs/', 'href="logs/').replace(/href="logs\/([\w.-]+)"/g, 'href="logs/$1.txt"')
   .replace('<a href="/_hub/logout">Sign out →</a>', '<a href="./">About →</a>')
   .replace("<body><main>", "<body>" + DEMO + "<main>")
   .replace("</body></html>", SCRIPT + "</body></html>");
+for (const s of live.values()) html = html.replaceAll(`href="${s.path}/"`, `href="sites/${s.name}.html"`);
 await Bun.write("docs/demo.html", html);
 
 const PAGES: Record<string, [string, string, string]> = {
