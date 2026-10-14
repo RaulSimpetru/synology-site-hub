@@ -438,7 +438,7 @@ function previewCard(url: URL) {
   return new Response(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:site_name" content="${esc(ORG || "Site hub")}"><meta property="og:type" content="website"><meta property="og:url" content="${esc(OIDC.hub + url.pathname)}">
-<meta property="og:image" content="${esc(OIDC.hub)}/_hub/og.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image" content="${esc(OIDC.hub)}/_hub/og.png?v=2"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Site hub: every git branch, live, on your own NAS"><meta name="twitter:card" content="summary_large_image"><meta name="description" content="${esc(desc)}"></head><body>${esc(title)}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 

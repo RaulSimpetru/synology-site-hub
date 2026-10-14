@@ -203,5 +203,5 @@ test("the preview picture is public and the card points at it", async () => {
   expect(img.headers.get("content-type")).toBe("image/png");
   expect((await img.arrayBuffer()).byteLength).toBeGreaterThan(1000);
   const card = await (await handle(new Request("http://hub.test/r/b/", { headers: { "user-agent": "WhatsApp/2" } }))).text();
-  expect(card).toContain('<meta property="og:image" content="http://hub.test/_hub/og.png">');
+  expect(card).toContain('<meta property="og:image" content="http://hub.test/_hub/og.png?v=2">');
 });
