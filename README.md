@@ -18,14 +18,12 @@
 
 Want to share a project wiki, a demo or a paper page with your colleagues, without putting it on the public internet? Push a branch that has a `Dockerfile`. About two minutes later it's live at `https://your-nas:4300` for everyone in your group. Every push updates it, and deleting the branch takes it down.
 
-| | |
-|---|---|
-| **Your NAS accounts** | People sign in through DSM's SSO Server, or with a shared password. |
-| **Fuzzy search** | Every running branch, grouped by project. Type `rv2` to find `reviewer-2`. |
-| **Shareable links** | Each preview gets a link, and a small "← All sites" badge back to the list. |
-| **Remove** | Only shown to people who can push to that branch; GitLab checks and records it. |
-| **Isolated sites** | No host mounts, no Linux capabilities, 1 GB of RAM each. |
-| **Small** | One TypeScript file on Bun, with tests. |
+- **Your NAS accounts.** People sign in through DSM's SSO Server, or with a shared password.
+- **Fuzzy search.** Every running branch, grouped by project; type `rv2` to find `reviewer-2`.
+- **Shareable links.** Each preview gets a link, and a small "← All sites" badge back to the list.
+- **Remove.** Only shown to people who can push to that branch; GitLab checks and records it.
+- **Isolated sites.** No host mounts, no Linux capabilities, 1 GB of RAM each.
+- **Small.** One TypeScript file on Bun, with tests.
 
 ## How it works
 
