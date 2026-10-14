@@ -1,0 +1,179 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--ground:#F4F3EF;--ink:#000;--soft:#555;--mark:#FFE14D;--card:#FFF}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.45 "Space Grotesk",system-ui,sans-serif}
+a{color:inherit}a:hover{background:var(--mark)}
+.mono,code,.meta,.find span,em,.foot{font-family:"Space Mono",ui-monospace,monospace}
+main{max-width:1040px;margin:0 auto;padding:48px 16px 48px}
+header{display:grid;grid-template-columns:minmax(0,1fr) auto;border:2px solid var(--ink);background:var(--card)}
+header>div:first-child{padding:24px 28px;border-right:2px solid var(--ink)}
+h1{margin:0;font-weight:700;font-size:clamp(48px,9vw,72px);line-height:.9;letter-spacing:-.035em}
+.lede{margin:14px 0 0;font-size:18px;max-width:34em}
+.meta{display:flex;flex-direction:column;font-size:13px;min-width:220px}
+.meta>*{padding:14px 20px;border-bottom:2px solid var(--ink)}.meta>:last-child{border-bottom:0;font-weight:700;text-decoration:none}
+.find{margin-top:24px;display:flex;border:2px solid var(--ink);background:var(--card)}
+.find span{padding:14px 18px;background:var(--ink);color:#fff;font-weight:700;font-size:13px}
+.find input{flex:1;min-width:0;border:0;outline:none;padding:0 18px;font:18px "Space Grotesk",sans-serif;background:none}
+.find:focus-within{box-shadow:4px 4px 0 var(--mark)}
+.list{display:flex;flex-direction:column}
+section{margin-top:36px;display:grid;grid-template-columns:240px minmax(0,1fr);column-gap:32px;border-top:4px solid var(--ink);padding-top:14px}
+h2{margin:0;font-weight:700;font-size:20px;line-height:1.15;overflow-wrap:anywhere}
+h2 small{display:block;font:400 13px "Space Mono",monospace;color:var(--soft)}
+ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:2px solid var(--ink);background:var(--card)}
+ol>li{display:grid;grid-template-columns:56px minmax(0,1fr) 100px 120px;gap:16px;align-items:start;padding:16px 18px;border-top:2px solid var(--ink)}
+ol>li:first-child{border-top:0}
+li.here{background:#FFF6C2}
+.no{font-weight:700;font-size:30px;line-height:1}
+code{font-weight:700;font-size:14px}
+em{font-style:normal;margin-left:10px;background:var(--ink);color:var(--mark);font-weight:700;font-size:11px;padding:2px 6px;text-transform:uppercase}
+li p{margin:2px 0 0;font-size:18px}
+li small{display:block;margin-top:4px;font-size:13px;color:var(--soft)}
+.age{font-size:14px;color:var(--soft);padding-top:4px}
+.acts{display:flex;flex-direction:column;gap:8px}
+form{margin:0}
+.open{display:block;text-align:center;padding:10px 0;background:var(--ink);color:#fff;text-decoration:none;font-weight:700;box-shadow:4px 4px 0 var(--mark)}
+.open:hover{background:var(--ink);transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--mark)}
+.rm{all:unset;box-sizing:border-box;display:block;width:100%;text-align:center;padding:6px 0;border:2px solid var(--ink);font:700 13px "Space Grotesk",sans-serif;cursor:pointer}
+.rm:hover,.rm:focus-visible{background:var(--mark)}
+dialog{max-width:520px;width:calc(100% - 32px);border:2px solid var(--ink);padding:0;box-shadow:8px 8px 0 var(--ink);background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(244,243,239,.85)}
+dialog form{padding:24px 26px}
+dialog h3{margin:0;font-size:24px;line-height:1.15}dialog h3 code{font-size:22px;background:var(--mark);padding:0 6px}
+dialog .proj{margin:6px 0 0;font:13px "Space Mono",monospace;color:var(--soft)}
+dialog ul{margin:18px 0 0;padding:0 0 0 18px;font-size:15px}dialog li{margin:6px 0}
+dialog .who{margin:14px 0 0;font-size:13px;color:var(--soft)}
+.btns{display:flex;justify-content:flex-end;gap:12px;margin-top:22px}
+.btns button{font:700 15px "Space Grotesk",sans-serif;padding:12px 18px;border:2px solid var(--ink);cursor:pointer}
+.cancel{background:var(--card)}.cancel:hover{background:var(--mark)}
+.go{background:var(--ink);color:#fff;box-shadow:4px 4px 0 var(--mark)}.go:hover{background:#B3261E;border-color:#B3261E}
+.down,.err{font-weight:700;font-size:13px}
+.err{border:2px solid var(--ink);background:var(--mark);padding:10px 14px;margin:24px 0 0}
+.foot{margin-top:44px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;border-top:2px solid var(--ink);padding-top:16px;font-size:13px}
+.sig{font:18px "Space Grotesk",sans-serif}.sig b{background:var(--mark);padding:2px 8px}
+@media (max-width:760px){
+  header{grid-template-columns:1fr}header>div:first-child{border-right:0;border-bottom:2px solid var(--ink)}
+  .meta{flex-direction:row;flex-wrap:wrap;min-width:0}.meta>*{border-bottom:0;border-right:2px solid var(--ink)}.meta>:last-child{border-right:0}
+  section{grid-template-columns:1fr;row-gap:12px}
+  ol>li{grid-template-columns:40px minmax(0,1fr) 100px}.no{font-size:22px}.what{grid-column:2/4}.age{grid-column:2}.acts{grid-column:3}
+}
+</style></head><body><div class="demo-note" style="position:sticky;top:0;z-index:5;background:#000;color:#FFE14D;font:700 13px 'Space Mono',monospace;padding:10px 16px;text-align:center">
+DEMO with made-up sites. Nothing here is real: search, open a site, or try Remove. <a href="./" style="color:#fff">← Back to the explanation</a></div><main>
+<header><div><h1>Site hub</h1>
+<p class="lede">Push a branch with a Dockerfile and it shows up here in about two minutes. Delete the branch and it's gone.</p></div>
+<div class="meta"><span style="font-family:'Space Grotesk',sans-serif">Example Lab</span><span>you</span><a href="./">About →</a></div></header>
+<label class="find"><span>SEARCH</span><input type="search" id="find" placeholder="Branch, project or commit (fuzzy)" autocomplete="off" autofocus></label>
+
+<div class="list"><section>
+<h2><small>example-lab/</small>paper-companion</h2>
+<ol><li>
+  <span class="no">01</span>
+  <div class="what"><code>reviewer-2</code>
+    <p>Answer the second reviewer&#39;s comments</p>
+    <small>Maya Okafor · <a class="mono" href="#">e06b12d4</a> · <a href="logs/site-example-lab-paper-companion-reviewer-2.txt">logs</a></small></div>
+  <span class="age">1 h ago</span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-reviewer-2.html">Open →</a>
+  <button type="button" class="rm" data-site="site-example-lab-paper-companion-reviewer-2" data-branch="reviewer-2" data-project="example-lab/paper-companion">Remove</button></span>
+</li>
+<li class="here">
+  <span class="no">02</span>
+  <div class="what"><code>main</code><em>Last viewed</em>
+    <p>Interactive figures for the preprint</p>
+    <small>Maya Okafor · <a class="mono" href="#">9c3e55f0</a> · <a href="logs/site-example-lab-paper-companion-main.txt">logs</a></small></div>
+  <span class="age">5 h ago</span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-main.html">Open →</a>
+  <button type="button" class="rm" data-site="site-example-lab-paper-companion-main" data-branch="main" data-project="example-lab/paper-companion">Remove</button></span>
+</li></ol></section>
+<section>
+<h2><small>example-lab/</small>project-wiki</h2>
+<ol><li>
+  <span class="no">03</span>
+  <div class="what"><code>main</code>
+    <p>Add the calibration protocol page</p>
+    <small>Jana Weber · <a class="mono" href="#">4f2a9c1e</a> · <a href="logs/site-example-lab-project-wiki-main.txt">logs</a></small></div>
+  <span class="age">3 h ago</span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-project-wiki-main.html">Open →</a>
+  <button type="button" class="rm" data-site="site-example-lab-project-wiki-main" data-branch="main" data-project="example-lab/project-wiki">Remove</button></span>
+</li>
+<li>
+  <span class="no">04</span>
+  <div class="what"><code>onboarding</code>
+    <p>Draft: first week for new students</p>
+    <small>Tom Lindqvist · <a class="mono" href="#">b81d07aa</a> · <a href="logs/site-example-lab-project-wiki-onboarding.txt">logs</a></small></div>
+  <span class="age">26 h ago</span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-project-wiki-onboarding.html">Open →</a>
+  <button type="button" class="rm" data-site="site-example-lab-project-wiki-onboarding" data-branch="onboarding" data-project="example-lab/project-wiki">Remove</button></span>
+</li></ol></section>
+<section>
+<h2><small>maya/</small>thesis-demo</h2>
+<ol><li>
+  <span class="no">05</span>
+  <div class="what"><code>main</code>
+    <p>Live demo of the chapter 3 model</p>
+    <small>Maya Okafor · <a class="mono" href="#">71aa3b9c</a> · <a href="logs/site-maya-thesis-demo-main.txt">logs</a></small></div>
+  <span class="age">2 days ago</span>
+  <span class="acts"><a class="open" href="sites/site-maya-thesis-demo-main.html">Open →</a>
+  </span>
+</li></ol></section></div>
+
+<dialog id="rmdlg" aria-labelledby="rmtitle"><form method="post">
+<h3 id="rmtitle">Remove the <code></code> preview?</h3>
+<p class="proj"></p>
+<ul>
+<li>The preview goes offline for everyone, and links to it stop working.</li>
+<li>Anything the site saved while running (form messages, sign-ups, uploads) is deleted with it.</li>
+<li>The branch and its code in GitLab are not touched.</li>
+<li>To bring it back, push to the branch again or re-run its pipeline; it is up again in about two minutes.</li>
+</ul>
+<p class="who">GitLab records that you stopped it (Operate → Environments).</p>
+<div class="btns"><button type="submit" formmethod="dialog" value="cancel" class="cancel" autofocus>Cancel</button><button type="submit" class="go">Remove preview</button></div>
+</form></dialog>
+<footer class="foot"><span class="sig"><a href="https://github.com/RaulSimpetru/synology-site-hub" style="text-decoration:none">site-hub</a> by <b>Raul C. Sîmpetru</b></span><span>5 sites · your-nas.example.org:4300</span></footer>
+</main><script>
+for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
+  const form = rmdlg.querySelector("form");
+  form.action = "/_hub/remove/" + encodeURIComponent(b.dataset.site);
+  rmdlg.querySelector("code").textContent = b.dataset.branch;
+  rmdlg.querySelector(".proj").textContent = b.dataset.project;
+  rmdlg.showModal();
+};
+// Fuzzy, fzf-style: every word's letters must appear in order; tighter matches rank first.
+// Best start wins; letters spread more than ~3 apart on average don't count, so long rows don't match everything.
+const score = (hay, word) => {
+  let best = -1;
+  for (let start = hay.indexOf(word[0]); start >= 0; start = hay.indexOf(word[0], start + 1)) {
+    let at = start, gaps = 0;
+    for (const ch of word.slice(1)) { const k = hay.indexOf(ch, at + 1); if (k < 0) { gaps = -1; break; } gaps += k - at - 1; at = k; }
+    if (gaps >= 0 && gaps <= word.length * 3 && (best < 0 || gaps < best)) best = gaps;
+  }
+  return best;
+};
+const rows = [...document.querySelectorAll("section ol>li")].map((li, i) => ({ li, i, hay: (li.closest("section").querySelector("h2").textContent + " " + li.textContent).toLowerCase().replace(/\s+/g, " ") }));
+find.oninput = () => {
+  const words = find.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  for (const r of rows) {
+    const s = words.map((w) => score(r.hay, w));
+    r.rank = s.some((x) => x < 0) ? -1 : s.reduce((a, b) => a + b, 0);
+    r.li.hidden = r.rank < 0;
+    r.li.style.order = words.length ? r.rank : r.i;
+  }
+  for (const sec of document.querySelectorAll("section")) {
+    const shown = rows.filter((r) => !r.li.hidden && sec.contains(r.li));
+    sec.hidden = !shown.length;
+    sec.style.order = words.length && shown.length ? Math.min(...shown.map((r) => r.rank)) : 0;
+  }
+};
+</script><script>
+rmdlg.querySelector("form").onsubmit = (e) => {
+  if (e.submitter && e.submitter.classList.contains("cancel")) return;
+  e.preventDefault();
+  const site = decodeURIComponent(rmdlg.querySelector("form").action.split("/").pop());
+  const b = document.querySelector('.rm[data-site="' + site + '"]');
+  b.closest(".acts").innerHTML = '<span class="down">Removing… (demo: nothing happens)</span>';
+  rmdlg.close();
+};
+</script></body></html>

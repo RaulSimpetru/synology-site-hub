@@ -162,3 +162,8 @@ test("the shared password check accepts only the right password", async () => {
   expect(authorizedFor(new Request("http://hub.test/"), "right:pw")).toBe(false);
   expect(authorizedFor(new Request("http://hub.test/"), "")).toBe(true);
 });
+
+test("search only indexes site rows, not the Remove dialog's bullet points", async () => {
+  const page = await (await get("/_hub", setCookies(await signIn()) + "; hub_gl=none")).text();
+  expect(page).toContain('querySelectorAll("section ol>li")');
+});

@@ -48,7 +48,7 @@ function ago(ms: number) {
   return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
 
-async function hubPage(current?: string, user?: string, glToken?: string) {
+export async function hubPage(current?: string, user?: string, glToken?: string) {
   const { sites, error } = await listSites(true);
   for (const name of removing) if (!sites.has(name)) removing.delete(name);
   const removable = new Set<string>();
@@ -178,7 +178,7 @@ const score = (hay, word) => {
   }
   return best;
 };
-const rows = [...document.querySelectorAll("li")].map((li, i) => ({ li, i, hay: (li.closest("section").querySelector("h2").textContent + " " + li.textContent).toLowerCase().replace(/\\s+/g, " ") }));
+const rows = [...document.querySelectorAll("section ol>li")].map((li, i) => ({ li, i, hay: (li.closest("section").querySelector("h2").textContent + " " + li.textContent).toLowerCase().replace(/\\s+/g, " ") }));
 find.oninput = () => {
   const words = find.value.trim().toLowerCase().split(/\\s+/).filter(Boolean);
   for (const r of rows) {

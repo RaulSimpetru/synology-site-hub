@@ -10,6 +10,8 @@ Push a branch that has a `Dockerfile`, and about two minutes later it appears at
 - **Badge:** each preview gets a small "← All sites" badge to get back to the hub.
 - **Isolation:** sites run with no host mounts, no Linux capabilities and 1 GB of RAM each.
 
+**[See how it works and try the demo](https://raulsimpetru.github.io/synology-site-hub/)**, with made-up sites.
+
 ## What you need
 
 - A Synology NAS with DSM 7.2 or later and **Container Manager** installed. Container Manager provides `docker` and `docker compose`.
@@ -101,6 +103,10 @@ Add a CI/CD variable `SITE_ENV_<NAME>` in the site's project, masked and not pro
 - **Trust:** the CI jobs hold the Docker socket, which is root on the NAS. That's why the CI file lives in the hub project and branches only supply a Dockerfile.
   - Enable the runner only for projects set up as in "Add a website".
   - Give people the **Developer** role on site projects. A Maintainer could point the project back at its own CI file.
+
+## The project page
+
+`docs/` is the GitHub Pages site: an explanation (`docs/index.html`) and a demo (`docs/demo.html`) that is the real hub page with made-up sites. Rebuild the demo after changing `router.ts` with `bun scripts/demo.ts`. To publish it, go to the GitHub repo's Settings → Pages and choose the `main` branch and the `/docs` folder.
 
 ## Updating the hub
 
