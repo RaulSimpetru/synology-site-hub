@@ -1,5 +1,7 @@
 # synology-site-hub
 
+![Push a branch, it goes live on your NAS, open and share it, find and remove it](docs/explainer.gif)
+
 Live previews of every git branch of your websites, hosted on your own Synology NAS and behind its login.
 
 Push a branch that has a `Dockerfile`, and about two minutes later it appears at `https://your-nas:4300` for everyone in your group. Every push updates it. Deleting the branch, or pressing **Remove** in the hub, takes it offline. It's built for sharing a project wiki, a demo or a paper page with colleagues, without a public server.
