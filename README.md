@@ -8,7 +8,7 @@
 [![Project page](https://img.shields.io/badge/project_page-read-FFE14D?style=flat-square&labelColor=000)](https://raulsimpetru.github.io/synology-site-hub/)
 [![MIT licence](https://img.shields.io/badge/licence-MIT-FFE14D?style=flat-square&labelColor=000)](LICENSE)
 
-<img src="docs/explainer.gif" width="720" alt="Push a branch, it goes live on your NAS, open and share it, find and remove it">
+<img src="docs/explainer.gif" width="800" alt="Push a branch, it goes live on your NAS, open and share it, find and remove it">
 
 [Demo](https://raulsimpetru.github.io/synology-site-hub/demo.html) · [How it works](#how-it-works) · [Install](#install-about-20-minutes) · [Add a website](#add-a-website) · [Limits](#limits)
 
