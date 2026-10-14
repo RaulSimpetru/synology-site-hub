@@ -20,6 +20,7 @@ Want to share a project wiki, a demo or a paper page with your colleagues, witho
 - **Fuzzy search.** Every running branch, grouped by project; type `rv2` to find `reviewer-2`.
 - **A link for every page.** Each site lives at `/<repo>/<branch>/`, so any page can be shared, and several sites work side by side in tabs. A small "← All sites" badge leads back to the list.
 - **Remove.** Only shown to people who can push to that branch; GitLab checks and records it.
+- **Build status.** A push shows up at once with a step track (Pushed, Queued, Build, Live); a live site stays open while its update builds, and a failed build shows its error line and job log.
 - **Isolated sites.** No host mounts, no Linux capabilities, 1 GB of RAM each.
 - **Small.** One TypeScript file on Bun, with tests.
 

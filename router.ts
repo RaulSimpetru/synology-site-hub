@@ -56,34 +56,109 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.ch
 
 function ago(ms: number) {
   const m = Math.round((Date.now() - ms) / 60000);
-  return m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
+
+// One row per branch: a running site, a pipeline still on its way, or both (a live site being updated).
+type Pipeline = { id: number; ref: string; sha: string; status: string; created_at: string; web_url: string; error?: string; job?: string; title?: string };
+type Row = { project: string; branch: string; site?: Site; pipe?: Pipeline; at: number };
+const QUEUED = new Set(["created", "waiting_for_resource", "preparing", "pending", "scheduled"]);
+const pipeCache = new Map<string, { at: number; list: Pipeline[] }>();
+
+// The latest pipeline of each branch (GitLab's scope=branches), seen through the visitor's own GitLab sign-in.
+async function pipelines(token: string, project: string) {
+  const key = `${token}|${project}`;
+  const hit = pipeCache.get(key);
+  if (hit && Date.now() - hit.at < 8_000) return hit.list;
+  if (pipeCache.size > 2000) pipeCache.clear();
+  const res = await gl(token, `projects/${encodeURIComponent(project)}/pipelines?scope=branches&per_page=100`).catch(() => undefined);
+  const list = (res?.ok ? await res.json() : []) as Pipeline[];
+  // The commit message of every build on its way, so a brand-new branch has a title too.
+  await Promise.all(list.filter((p) => QUEUED.has(p.status) || p.status === "running" || p.status === "failed").map(async (p) => {
+    const c = await gl(token, `projects/${encodeURIComponent(project)}/repository/commits/${p.sha}`).catch(() => undefined);
+    if (c?.ok) p.title = ((await c.json()) as { title?: string }).title;
+  }));
+  // For a failed build, the failing job and the last error line of its log.
+  await Promise.all(list.filter((p) => p.status === "failed").map(async (p) => {
+    const jobs = await gl(token, `projects/${encodeURIComponent(project)}/pipelines/${p.id}/jobs?scope[]=failed`).catch(() => undefined);
+    const job = jobs?.ok ? ((await jobs.json()) as { id: number; web_url: string }[])[0] : undefined;
+    if (!job) return;
+    p.job = job.web_url;
+    const trace = await gl(token, `projects/${encodeURIComponent(project)}/jobs/${job.id}/trace`).catch(() => undefined);
+    const lines = trace?.ok ? (await trace.text()).replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").split("\n").map((l) => l.replace(/^section_\w+:\d+:\S+\r?/, "").trim()).filter(Boolean) : [];
+    p.error = [...lines].reverse().find((l) => /error|failed|not found|cannot/i.test(l) && !/^ERROR: Job failed/.test(l)) ?? lines.at(-1);
+  }));
+  pipeCache.set(key, { at: Date.now(), list });
+  return list;
+}
+
+const STEPS = ["Pushed", "Queued", "Build", "Live"];
+// done / now / fail / todo per step, plus an optional note on the step that is happening.
+function track(states: string[], note?: string) {
+  return `<div class="track">${states.map((k, i) => `<span class="st ${k}">${STEPS[i]}${k === "now" && note ? ` ${note}` : ""}${k === "done" ? " ✓" : k === "fail" ? " ✕" : ""}</span>`).join("")}</div>`;
+}
+const since = (iso: string) => { const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 export async function hubPage(current?: string, user?: string, glToken?: string) {
   const { sites, error } = await listSites(true);
   for (const name of removing) if (!sites.has(name)) removing.delete(name);
   const removable = new Set<string>();
   if (glToken) await Promise.all([...sites.values()].map(async (s) => { if (await canRemove(glToken, s)) removable.add(s.name); }));
-  const projects = new Map<string, Site[]>();
-  for (const s of [...sites.values()].sort((a, b) => b.created - a.created)) {
-    const p = s.labels["hub.project"] ?? "other";
-    projects.set(p, [...(projects.get(p) ?? []), s]);
+  const rows = new Map<string, Row>();
+  for (const s of sites.values()) {
+    const project = s.labels["hub.project"] ?? "other", branch = s.labels["hub.branch"] ?? s.name;
+    rows.set(`${project}\n${branch}`, { project, branch, site: s, at: s.created });
   }
-  let n = 0;
+  // Projects the hub already knows, so a brand-new branch shows up while its first build runs.
+  if (glToken) {
+    const known = [...new Set([...rows.values()].map((r) => r.project))];
+    await Promise.all(known.map(async (project) => {
+      for (const p of await pipelines(glToken, project)) {
+        const row = rows.get(`${project}\n${p.ref}`);
+        const fresh = !row?.site || !p.sha.startsWith(row.site.labels["hub.commit"] ?? "\0");
+        const active = QUEUED.has(p.status) || p.status === "running" || p.status === "failed";
+        if (!fresh || !active) continue;
+        if (row) row.pipe = p;
+        else rows.set(`${project}\n${p.ref}`, { project, branch: p.ref, pipe: p, at: Date.parse(p.created_at) });
+      }
+    }));
+  }
+  const projects = new Map<string, Row[]>();
+  for (const r of [...rows.values()].sort((a, b) => b.at - a.at)) projects.set(r.project, [...(projects.get(r.project) ?? []), r]);
+  let n = 0, building = 0, failed = 0;
   const groups = [...projects].map(([project, list]) => `<section>
 <h2><small>${esc(project.split("/").slice(0, -1).join("/"))}/</small>${esc(project.split("/").pop())}</h2>
-<ol>${list.map((s) => {
-    const l = s.labels;
-    const up = s.state === "running";
-    const here = s.name === current;
-    return `<li${here ? ' class="here"' : ""}>
+<ol>${list.map(({ site: s, pipe: p, branch, project }) => {
+    const l = s?.labels ?? {};
+    const up = s?.state === "running";
+    const here = s && s.name === current;
+    const live = up && !(s && removing.has(s.name));
+    let steps = "", meta = "";
+    if (p && QUEUED.has(p.status)) { building++; steps = track(["done", "now", "todo", "todo"]); }
+    else if (p && p.status === "running") { building++; steps = track(["done", "done", "now", "todo"], since(p.created_at)); }
+    else if (p) { failed++; steps = track(["done", "done", "fail", "todo"]); }
+    else if (s && !up) steps = track(["done", "done", "done", "fail"]);
+    const sha = p?.sha.slice(0, 8);
+    if (p && s) meta = `live: <span class="mono">${esc(l["hub.commit"])}</span> · ${p.status === "failed" ? "failed" : "building"}: <a class="mono" href="${esc(p.web_url)}">${esc(sha)}</a>${p.title ? ` “${esc(p.title)}”` : ""}`;
+    else if (p) meta = `<a class="mono" href="${esc(p.web_url)}">${esc(sha)}</a> · pushed ${ago(Date.parse(p.created_at))}`;
+    else meta = `${esc(l["hub.author"]?.replace(/\s*<.*>$/, ""))} · <a class="mono" href="${esc(l["hub.url"])}">${esc(l["hub.commit"])}</a> · <a href="/_hub/logs/${esc(s!.name)}">logs</a>`;
+    if (s && !up) meta += ` · stopped: ${esc(s.status)}`;
+    const err = p?.status === "failed" && p.error ? `<pre class="error">${esc(p.error)}</pre>` : "";
+    const main = s && removing.has(s.name) ? '<span class="down">Removing…</span>'
+      : live ? `<a class="open" href="${esc(s!.path)}/">Open →</a>`
+      : s ? `<a class="open quiet" href="/_hub/logs/${esc(s.name)}">Logs</a>`
+      : '<span class="notyet">Not live yet</span>';
+    const second = p?.status === "failed" ? `<a class="side" href="${esc(p.job ?? p.web_url)}">Job log ↗</a>`
+      : p ? `<a class="side" href="${esc(p.web_url)}">Watch log ↗</a>`
+      : s && removable.has(s.name) && !removing.has(s.name) ? `<button type="button" class="rm" data-site="${esc(s.name)}" data-branch="${esc(branch)}" data-project="${esc(project)}">Remove</button>` : "";
+    return `<li${here ? ' class="here"' : ""}${p && p.status !== "failed" ? " data-active" : ""}>
   <span class="no">${String(++n).padStart(2, "0")}</span>
-  <div class="what"><code>${esc(l["hub.branch"])}</code>${here ? '<em>Last viewed</em>' : ""}
-    <p>${esc(l["hub.title"])}</p>
-    <small>${esc(l["hub.author"]?.replace(/\s*<.*>$/, ""))} · <a class="mono" href="${esc(l["hub.url"])}">${esc(l["hub.commit"])}</a> · <a href="/_hub/logs/${esc(s.name)}">logs</a></small></div>
-  <span class="age">${ago(s.created)}</span>
-  <span class="acts">${removing.has(s.name) ? '<span class="down">Removing…</span>' : up ? `<a class="open" href="${esc(s.path)}/">Open →</a>` : `<span class="down">${esc(s.status)}</span>`}
-  ${removable.has(s.name) && !removing.has(s.name) ? `<button type="button" class="rm" data-site="${esc(s.name)}" data-branch="${esc(l["hub.branch"])}" data-project="${esc(l["hub.project"])}">Remove</button>` : ""}</span>
+  <div class="what"><code>${esc(branch)}</code>${here ? '<em>Last viewed</em>' : ""}
+    <p>${esc(l["hub.title"] ?? p?.title ?? "")}</p>
+    <small>${meta}</small>${err}</div>
+  <span class="age">${s ? ago(s.created) : ""}</span>
+  <span class="acts">${main}${second}</span>
+  ${steps}
 </li>`;
   }).join("\n")}</ol></section>`).join("\n");
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -126,6 +201,13 @@ li small{display:block;margin-top:4px;font-size:13px;color:var(--soft)}
 form{margin:0}
 .open{display:block;text-align:center;padding:10px 0;background:var(--ink);color:#fff;text-decoration:none;font-weight:700;box-shadow:4px 4px 0 var(--mark)}
 .open:hover{background:var(--ink);transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--mark)}
+.track{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:6px -18px -16px;border-top:2px solid var(--ink)}
+.st{padding:8px 14px;font:700 12px "Space Mono",monospace;border-right:2px solid var(--ink);color:#8A8A8A}.st:last-child{border-right:0}
+.st.done{background:var(--ink);color:#fff}.st.now{background:repeating-linear-gradient(-45deg,var(--mark) 0 10px,#F5D33A 10px 20px);color:var(--ink)}.st.fail{background:#B3261E;color:#fff}
+pre.error{margin:10px 0 0;padding:10px 12px;background:var(--ink);color:var(--ground);font:13px/1.5 "Space Mono",monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.notyet{display:block;text-align:center;padding:10px 0;border:2px dashed var(--ink);color:var(--soft);font-weight:700}
+.open.quiet{background:var(--card);color:var(--ink);box-shadow:none;border:2px solid var(--ink)}
+.side{display:block;text-align:center;padding:6px 0;border:2px solid var(--ink);font-weight:700;font-size:13px;text-decoration:none}
 .rm{all:unset;box-sizing:border-box;display:block;width:100%;text-align:center;padding:6px 0;border:2px solid var(--ink);font:700 13px "Space Grotesk",sans-serif;cursor:pointer}
 .rm:hover,.rm:focus-visible{background:var(--mark)}
 dialog{max-width:520px;width:calc(100% - 32px);border:2px solid var(--ink);padding:0;box-shadow:8px 8px 0 var(--ink);background:var(--card);color:var(--ink)}
@@ -169,7 +251,7 @@ ${GITLAB && !glToken ? '<p class="lede"><a href="/_hub/gitlab/login">Sign in to 
 <p class="who">GitLab records that you stopped it (Operate → Environments).</p>
 <div class="btns"><button type="submit" formmethod="dialog" value="cancel" class="cancel" autofocus>Cancel</button><button type="submit" class="go">Remove preview</button></div>
 </form></dialog>
-<footer class="foot"><span class="sig"><a href="https://github.com/RaulSimpetru/synology-site-hub" style="text-decoration:none">site-hub</a> by <b>Raul C. Sîmpetru</b></span><span>${sites.size} site${sites.size === 1 ? "" : "s"} · ${esc(new URL(OIDC.hub).host)}</span></footer>
+<footer class="foot"><span class="sig"><a href="https://github.com/RaulSimpetru/synology-site-hub" style="text-decoration:none">site-hub</a> by <b>Raul C. Sîmpetru</b></span><span>${sites.size} site${sites.size === 1 ? "" : "s"}${building ? ` · ${building} building` : ""}${failed ? ` · ${failed} failed` : ""} · ${esc(new URL(OIDC.hub).host)}</span></footer>
 </main><script>
 for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
   const form = rmdlg.querySelector("form");
@@ -178,6 +260,10 @@ for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
   rmdlg.querySelector(".proj").textContent = b.dataset.project;
   rmdlg.showModal();
 };
+// While something builds, refresh every 10 s, unless the visitor is searching or deciding in the dialog.
+if (document.querySelector("li[data-active]")) setInterval(() => {
+  if (!document.getElementById("find").value && !rmdlg.open) location.reload();
+}, 10000);
 // Fuzzy, fzf-style: every word's letters must appear in order; tighter matches rank first.
 // Best start wins; letters spread more than ~3 apart on average don't count, so long rows don't match everything.
 const score = (hay, word) => {

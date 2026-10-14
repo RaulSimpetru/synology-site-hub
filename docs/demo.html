@@ -38,6 +38,13 @@ li small{display:block;margin-top:4px;font-size:13px;color:var(--soft)}
 form{margin:0}
 .open{display:block;text-align:center;padding:10px 0;background:var(--ink);color:#fff;text-decoration:none;font-weight:700;box-shadow:4px 4px 0 var(--mark)}
 .open:hover{background:var(--ink);transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--mark)}
+.track{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:6px -18px -16px;border-top:2px solid var(--ink)}
+.st{padding:8px 14px;font:700 12px "Space Mono",monospace;border-right:2px solid var(--ink);color:#8A8A8A}.st:last-child{border-right:0}
+.st.done{background:var(--ink);color:#fff}.st.now{background:repeating-linear-gradient(-45deg,var(--mark) 0 10px,#F5D33A 10px 20px);color:var(--ink)}.st.fail{background:#B3261E;color:#fff}
+pre.error{margin:10px 0 0;padding:10px 12px;background:var(--ink);color:var(--ground);font:13px/1.5 "Space Mono",monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.notyet{display:block;text-align:center;padding:10px 0;border:2px dashed var(--ink);color:var(--soft);font-weight:700}
+.open.quiet{background:var(--card);color:var(--ink);box-shadow:none;border:2px solid var(--ink)}
+.side{display:block;text-align:center;padding:6px 0;border:2px solid var(--ink);font-weight:700;font-size:13px;text-decoration:none}
 .rm{all:unset;box-sizing:border-box;display:block;width:100%;text-align:center;padding:6px 0;border:2px solid var(--ink);font:700 13px "Space Grotesk",sans-serif;cursor:pointer}
 .rm:hover,.rm:focus-visible{background:var(--mark)}
 dialog{max-width:520px;width:calc(100% - 32px);border:2px solid var(--ink);padding:0;box-shadow:8px 8px 0 var(--ink);background:var(--card);color:var(--ink)}
@@ -72,52 +79,70 @@ DEMO with made-up sites. Nothing here is real: search, open a site, or try Remov
 <h2><small>example-lab/</small>paper-companion</h2>
 <ol><li>
   <span class="no">01</span>
+  <div class="what"><code>figure-3</code>
+    <p>Figure 3: interactive confusion matrix</p>
+    <small><a class="mono" href="#">8d2f41c7</a> · pushed just now</small></div>
+  <span class="age"></span>
+  <span class="acts"><span class="notyet">Not live yet</span><a class="side" href="#">Watch log ↗</a></span>
+  <div class="track"><span class="st done">Pushed ✓</span><span class="st now">Queued</span><span class="st todo">Build</span><span class="st todo">Live</span></div>
+</li>
+<li>
+  <span class="no">02</span>
   <div class="what"><code>reviewer-2</code>
     <p>Answer the second reviewer&#39;s comments</p>
-    <small>Maya Okafor · <a class="mono" href="#">e06b12d4</a> · <a href="logs/site-example-lab-paper-companion-reviewer-2.txt">logs</a></small></div>
+    <small>live: <span class="mono">e06b12d4</span> · building: <a class="mono" href="#">5c1e0b9a</a> “Reply to comment 4: add the sensitivity analysis”</small></div>
   <span class="age">1 h ago</span>
-  <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-reviewer-2.html">Open →</a>
-  <button type="button" class="rm" data-site="site-example-lab-paper-companion-reviewer-2" data-branch="reviewer-2" data-project="example-lab/paper-companion">Remove</button></span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-reviewer-2.html">Open →</a><a class="side" href="#">Watch log ↗</a></span>
+  <div class="track"><span class="st done">Pushed ✓</span><span class="st done">Queued ✓</span><span class="st now">Build 0:52</span><span class="st todo">Live</span></div>
 </li>
 <li class="here">
-  <span class="no">02</span>
+  <span class="no">03</span>
   <div class="what"><code>main</code><em>Last viewed</em>
     <p>Interactive figures for the preprint</p>
     <small>Maya Okafor · <a class="mono" href="#">9c3e55f0</a> · <a href="logs/site-example-lab-paper-companion-main.txt">logs</a></small></div>
   <span class="age">5 h ago</span>
-  <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-main.html">Open →</a>
-  <button type="button" class="rm" data-site="site-example-lab-paper-companion-main" data-branch="main" data-project="example-lab/paper-companion">Remove</button></span>
-</li></ol></section>
-<section>
-<h2><small>example-lab/</small>project-wiki</h2>
-<ol><li>
-  <span class="no">03</span>
-  <div class="what"><code>main</code>
-    <p>Add the calibration protocol page</p>
-    <small>Jana Weber · <a class="mono" href="#">4f2a9c1e</a> · <a href="logs/site-example-lab-project-wiki-main.txt">logs</a></small></div>
-  <span class="age">3 h ago</span>
-  <span class="acts"><a class="open" href="sites/site-example-lab-project-wiki-main.html">Open →</a>
-  <button type="button" class="rm" data-site="site-example-lab-project-wiki-main" data-branch="main" data-project="example-lab/project-wiki">Remove</button></span>
-</li>
-<li>
-  <span class="no">04</span>
-  <div class="what"><code>onboarding</code>
-    <p>Draft: first week for new students</p>
-    <small>Tom Lindqvist · <a class="mono" href="#">b81d07aa</a> · <a href="logs/site-example-lab-project-wiki-onboarding.txt">logs</a></small></div>
-  <span class="age">26 h ago</span>
-  <span class="acts"><a class="open" href="sites/site-example-lab-project-wiki-onboarding.html">Open →</a>
-  <button type="button" class="rm" data-site="site-example-lab-project-wiki-onboarding" data-branch="onboarding" data-project="example-lab/project-wiki">Remove</button></span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-main.html">Open →</a><button type="button" class="rm" data-site="site-example-lab-paper-companion-main" data-branch="main" data-project="example-lab/paper-companion">Remove</button></span>
+  
 </li></ol></section>
 <section>
 <h2><small>maya/</small>thesis-demo</h2>
 <ol><li>
+  <span class="no">04</span>
+  <div class="what"><code>defence-slides</code>
+    <p>Slides for the defence</p>
+    <small><a class="mono" href="#">0b7e93fa</a> · pushed 2 min ago</small></div>
+  <span class="age"></span>
+  <span class="acts"><span class="notyet">Not live yet</span><a class="side" href="#">Watch log ↗</a></span>
+  <div class="track"><span class="st done">Pushed ✓</span><span class="st done">Queued ✓</span><span class="st now">Build 1:35</span><span class="st todo">Live</span></div>
+</li>
+<li>
   <span class="no">05</span>
   <div class="what"><code>main</code>
     <p>Live demo of the chapter 3 model</p>
     <small>Maya Okafor · <a class="mono" href="#">71aa3b9c</a> · <a href="logs/site-maya-thesis-demo-main.txt">logs</a></small></div>
   <span class="age">2 days ago</span>
-  <span class="acts"><a class="open" href="sites/site-maya-thesis-demo-main.html">Open →</a>
-  </span>
+  <span class="acts"><a class="open" href="sites/site-maya-thesis-demo-main.html">Open →</a></span>
+  
+</li></ol></section>
+<section>
+<h2><small>example-lab/</small>project-wiki</h2>
+<ol><li>
+  <span class="no">06</span>
+  <div class="what"><code>main</code>
+    <p>Add the calibration protocol page</p>
+    <small>Jana Weber · <a class="mono" href="#">4f2a9c1e</a> · <a href="logs/site-example-lab-project-wiki-main.txt">logs</a></small></div>
+  <span class="age">3 h ago</span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-project-wiki-main.html">Open →</a><button type="button" class="rm" data-site="site-example-lab-project-wiki-main" data-branch="main" data-project="example-lab/project-wiki">Remove</button></span>
+  
+</li>
+<li>
+  <span class="no">07</span>
+  <div class="what"><code>onboarding</code>
+    <p>Draft: first week for new students</p>
+    <small>live: <span class="mono">b81d07aa</span> · failed: <a class="mono" href="#">c3a9e7d2</a> “Add the lab safety section”</small><pre class="error">error: Could not resolve &#34;./sections/safety.md&#34;</pre></div>
+  <span class="age">26 h ago</span>
+  <span class="acts"><a class="open" href="sites/site-example-lab-project-wiki-onboarding.html">Open →</a><a class="side" href="#">Job log ↗</a></span>
+  <div class="track"><span class="st done">Pushed ✓</span><span class="st done">Queued ✓</span><span class="st fail">Build ✕</span><span class="st todo">Live</span></div>
 </li></ol></section></div>
 
 <dialog id="rmdlg" aria-labelledby="rmtitle"><form method="post">
@@ -132,7 +157,7 @@ DEMO with made-up sites. Nothing here is real: search, open a site, or try Remov
 <p class="who">GitLab records that you stopped it (Operate → Environments).</p>
 <div class="btns"><button type="submit" formmethod="dialog" value="cancel" class="cancel" autofocus>Cancel</button><button type="submit" class="go">Remove preview</button></div>
 </form></dialog>
-<footer class="foot"><span class="sig"><a href="https://github.com/RaulSimpetru/synology-site-hub" style="text-decoration:none">site-hub</a> by <b>Raul C. Sîmpetru</b></span><span>5 sites · your-nas.example.org:4300</span></footer>
+<footer class="foot"><span class="sig"><a href="https://github.com/RaulSimpetru/synology-site-hub" style="text-decoration:none">site-hub</a> by <b>Raul C. Sîmpetru</b></span><span>5 sites · 3 building · 1 failed · your-nas.example.org:4300</span></footer>
 </main><script>
 for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
   const form = rmdlg.querySelector("form");
@@ -141,6 +166,10 @@ for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
   rmdlg.querySelector(".proj").textContent = b.dataset.project;
   rmdlg.showModal();
 };
+// While something builds, refresh every 10 s, unless the visitor is searching or deciding in the dialog.
+if (document.querySelector("li[data-active]")) setInterval(() => {
+  if (!document.getElementById("find").value && !rmdlg.open) location.reload();
+}, 10000);
 // Fuzzy, fzf-style: every word's letters must appear in order; tighter matches rank first.
 // Best start wins; letters spread more than ~3 apart on average don't count, so long rows don't match everything.
 const score = (hay, word) => {

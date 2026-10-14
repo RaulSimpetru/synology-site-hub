@@ -33,6 +33,18 @@ const gitlab = Bun.serve({
     const branch = url.pathname.match(/^\/api\/v4\/projects\/g%2Fp\/repository\/branches\/(.+)$/);
     if (branch) return Response.json({ can_push: branch[1] === "main" });
     if (url.pathname === "/api/v4/projects/g%2Fp/environments" && url.searchParams.get("name") === "review/main") return Response.json([{ id: 7 }]);
+    const now = new Date(Date.now() - 72_000).toISOString();
+    if (url.pathname === "/api/v4/projects/g%2Fp/pipelines") return Response.json([
+      { id: 1, ref: "main", sha: "aaaa1111ffff", status: "success", created_at: now, web_url: "http://gl/p/1" },
+      { id: 2, ref: "locked", sha: "cccc3333ffff", status: "failed", created_at: now, web_url: "http://gl/p/2" },
+      { id: 3, ref: "fresh-idea", sha: "dddd4444ffff", status: "running", created_at: now, web_url: "http://gl/p/3" },
+      { id: 4, ref: "waiting", sha: "eeee5555ffff", status: "pending", created_at: now, web_url: "http://gl/p/4" },
+      { id: 5, ref: "gone", sha: "ffff6666ffff", status: "success", created_at: now, web_url: "http://gl/p/5" },
+    ]);
+    const commit = url.pathname.match(/^\/api\/v4\/projects\/g%2Fp\/repository\/commits\/(\w+)$/);
+    if (commit) return Response.json({ title: `Commit ${commit[1].slice(0, 4)}` });
+    if (url.pathname === "/api/v4/projects/g%2Fp/pipelines/2/jobs") return Response.json([{ id: 21, web_url: "http://gl/job/21" }]);
+    if (url.pathname === "/api/v4/projects/g%2Fp/jobs/21/trace") return new Response("\x1b[32;1m$ bun run build\x1b[0;m\nerror: Could not resolve \"three\"\nERROR: Job failed: exit code 1\n");
     if (url.pathname === "/api/v4/projects/g%2Fp/environments/7/stop" && req.method === "POST") { stopped.push("main"); return Response.json({}); }
     return new Response("?", { status: 404 });
   },
@@ -45,8 +57,8 @@ const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
 } });
 const docker = Bun.serve({
   port: 0,
-  fetch: () => Response.json([{ Names: ["/127.0.0.1"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": String(site.port), "hub.project": "g/p", "hub.branch": "main" } },
-    { Names: ["/locked-site"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": "1", "hub.project": "g/p", "hub.branch": "locked" } }]),
+  fetch: () => Response.json([{ Names: ["/127.0.0.1"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": String(site.port), "hub.project": "g/p", "hub.branch": "main", "hub.commit": "aaaa1111", "hub.title": "Main site" } },
+    { Names: ["/locked-site"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": "1", "hub.project": "g/p", "hub.branch": "locked", "hub.commit": "bbbb2222" } }]),
 });
 Object.assign(process.env, {
   OIDC_ISSUER: `http://localhost:${sso.port}`, OIDC_CLIENT_ID: "hub", OIDC_CLIENT_SECRET: "s3cret",
@@ -204,4 +216,30 @@ test("the preview picture is public and the card points at it", async () => {
   expect((await img.arrayBuffer()).byteLength).toBeGreaterThan(1000);
   const card = await (await handle(new Request("http://hub.test/r/b/", { headers: { "user-agent": "WhatsApp/2" } }))).text();
   expect(card).toContain('<meta property="og:image" content="http://hub.test/_hub/og.png?v=2">');
+});
+
+test("build statuses: a step track for queued, building, failed and stopped branches", async () => {
+  const session = setCookies(await signIn());
+  const bounce = await get("/_hub", session);
+  const state = new URL(bounce.headers.get("location")!).searchParams.get("state");
+  const cookie = session + "; " + setCookies(await get(`/_hub/gitlab?code=glgood&state=${state}`, session + "; " + setCookies(bounce))).replace(/hub_glstate=; /, "");
+  const page = await (await get("/_hub", cookie)).text();
+  const row = (branch: string) => page.split("<li").find((li) => li.includes(`<code>${branch}</code>`)) ?? "";
+  // Running and up to date: no track.
+  expect(row("main")).not.toContain('class="track"');
+  // A live site whose newer build failed: old version stays open, the error line and the job log are shown.
+  expect(row("locked")).toContain('<span class="st fail">Build ✕</span>');
+  expect(row("locked")).toContain("live: <span class=\"mono\">bbbb2222</span> · failed:");
+  expect(row("locked")).toContain('error: Could not resolve &#34;three&#34;');
+  expect(row("locked")).toContain('href="http://gl/job/21">Job log ↗');
+  // A new branch on its first build, and one waiting for the runner: listed before anything is deployed.
+  expect(row("fresh-idea")).toContain('<span class="st now">Build 1:1');
+  expect(row("fresh-idea")).toContain("Not live yet");
+  expect(row("fresh-idea")).toContain("<p>Commit dddd</p>");
+  expect(row("locked")).toContain("“Commit cccc”");
+  expect(row("fresh-idea")).toContain("data-active");
+  expect(row("waiting")).toContain('<span class="st now">Queued</span>');
+  // A branch whose preview was removed (pipeline done, no container) stays gone.
+  expect(page).not.toContain("<code>gone</code>");
+  expect(page).toContain("2 building · 1 failed");
 });
