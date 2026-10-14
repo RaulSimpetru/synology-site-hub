@@ -9,7 +9,7 @@ Push a branch. CI deploys it in about 2 minutes, every push updates it, and dele
 ## Add a new website (another GitLab repo)
 
 1. **Dockerfile at the repo root.** The server listens on `$PORT` (3000) and must run with no host mounts, no Linux capabilities and 1 GB of RAM. Start from `examples/Dockerfile.bun`.
-2. **No `.gitlab-ci.yml`.** A Maintainer sets Settings → CI/CD → General pipelines → CI/CD configuration file to `review.gitlab-ci.yml@<group>/site-hub`.
+2. **No `.gitlab-ci.yml`.** A Maintainer sets Settings → CI/CD → General pipelines → CI/CD configuration file to `<HUB_URL>/_hub/ci.yml`.
 3. **Runner.** A human enables the existing `site-hub` project runner for the project. Never register a new runner.
 
 Steps 2 and 3 are GitLab settings: ask the user, or use `glab api` if you have permission.
@@ -36,4 +36,4 @@ Wait for `"status":"success"`, then open the preview link.
 
 - `router.ts` is the proxy, login and hub page; `router.test.ts` has its tests (`bun test`).
 - `compose.yaml` runs the router, a read-only Docker API proxy and the runner in `/volume1/docker/site-hub` on the NAS. Settings live in `.env` there (`.env.example` lists them).
-- DSM has no git: copy `router.ts` (and `compose.yaml`, `Dockerfile` or `og.png` if changed) with `scp -O`, then run `sudo docker compose up -d --build router` in that folder. Changes to `review.gitlab-ci.yml` apply on each site's next pipeline.
+- A push to `main` runs the tests on GitHub and publishes `ghcr.io/raulsimpetru/synology-site-hub:latest`; a NAS updates with `sudo docker compose pull && sudo docker compose up -d`. The hub serves `review.gitlab-ci.yml` at `/_hub/ci.yml` (HUB_URL filled in); changes apply on each site's next pipeline.

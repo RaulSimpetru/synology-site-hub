@@ -1,8 +1,9 @@
-# Branch previews on the site hub. A site project uses this file directly:
-# Settings → CI/CD → General pipelines → CI/CD configuration file = review.gitlab-ci.yml@<group>/site-hub
-# so branches can't change the docker commands below. The repo needs a Dockerfile whose server listens on $PORT (3000).
+# Branch previews on the site hub. A site project uses this file directly, so branches can't change
+# the docker commands below: Settings → CI/CD → General pipelines → CI/CD configuration file =
+# https://<your-hub>/_hub/ci.yml (the hub serves this file with HUB_URL filled in).
+# The repo needs a Dockerfile whose server listens on $PORT (3000).
 variables:
-  HUB_URL: "https://your-nas.example.org:4300" # your hub's address (README, step 6)
+  HUB_URL: "https://your-nas.example.org:4300" # filled in by the hub when served from /_hub/ci.yml
   SITE: "site-$CI_PROJECT_PATH_SLUG-$CI_COMMIT_REF_SLUG"
   SITE_PORT: "3000"
 

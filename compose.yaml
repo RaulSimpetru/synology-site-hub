@@ -1,8 +1,9 @@
-# Run on the NAS: sudo docker compose up -d --build
+# synology-site-hub. Put this file and your .env (from .env.example) in one folder, then:
+#   sudo docker compose up -d          update later: sudo docker compose pull && sudo docker compose up -d
 name: site-hub
 services:
   router:
-    build: .
+    image: ghcr.io/raulsimpetru/synology-site-hub:${HUB_VERSION:-latest}
     ports: ["${HUB_PORT:-4300}:8080"]
     environment:
       HUB_URL: ${HUB_URL:-}
@@ -12,13 +13,13 @@ services:
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
-      # GitLab OAuth app (scope api, redirect <hub>/_hub/gitlab) for the Remove button; unset = no Remove.
+      # GitLab OAuth app (scope api, redirect <hub>/_hub/gitlab) for Remove and build status; unset = neither.
       GITLAB_URL: ${GITLAB_URL:-}
       GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID:-}
       GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET:-}
       DOCKER_API: http://docker:2375
     # DSM's default certificate (root-only files, so run as uid 0 but with no capabilities).
-    volumes: ["/usr/syno/etc/certificate/system/default:/certs:ro"]
+    volumes: ["${CERT_DIR:-/usr/syno/etc/certificate/system/default}:/certs:ro"]
     user: "0"
     cap_drop: [ALL]
     networks: [sites, internal]
@@ -32,14 +33,36 @@ services:
     networks: [internal]
     restart: unless-stopped
 
-  # Dedicated runner for review.gitlab-ci.yml: its jobs get the Docker socket, so it only takes
-  # jobs tagged site-hub from projects it's enabled for. Registered once, see README step 4.
+  # Registers the runner once, from RUNNER_TOKEN in .env; does nothing once it is registered.
+  runner-setup:
+    image: gitlab/gitlab-runner:latest
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        grep -qs '\[\[runners\]\]' /etc/gitlab-runner/config.toml && exit 0
+        [ -n "$$RUNNER_TOKEN" ] || { echo "No RUNNER_TOKEN in .env yet: the hub runs, but nothing gets built (README, step 2)."; exit 0; }
+        gitlab-runner register --non-interactive --url "$$GITLAB_URL" --token "$$RUNNER_TOKEN" \
+          --executor docker --docker-image docker:27-cli \
+          --docker-volumes /var/run/docker.sock:/var/run/docker.sock --description site-hub
+    environment:
+      GITLAB_URL: ${GITLAB_URL:-}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+    volumes: ["${RUNNER_CONFIG:-runner-config}:/etc/gitlab-runner"]
+    restart: "no"
+
+  # Runs the site-hub CI jobs. They get the Docker socket, so the runner only takes jobs tagged
+  # site-hub (set when you create it in GitLab), from projects it is enabled for.
   runner:
     image: gitlab/gitlab-runner:latest
+    depends_on:
+      runner-setup: { condition: service_completed_successfully }
     volumes:
-      - ./runner:/etc/gitlab-runner
+      - ${RUNNER_CONFIG:-runner-config}:/etc/gitlab-runner
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+
+volumes:
+  runner-config:
 
 networks:
   sites: { name: sites }          # CI attaches every site container here

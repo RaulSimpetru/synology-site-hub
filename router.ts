@@ -530,6 +530,12 @@ function previewCard(url: URL) {
 
 export async function handle(req: Request) {
   const url = new URL(req.url);
+  // The CI template for site projects, with this hub's address filled in: point a project's CI/CD
+  // configuration file at <hub>/_hub/ci.yml. Public, because GitLab fetches it without a login.
+  if (url.pathname === "/_hub/ci.yml") {
+    const yml = await Bun.file(new URL("./review.gitlab-ci.yml", import.meta.url).pathname).text();
+    return new Response(yml.replace(/^(\s*HUB_URL:\s*).*$/m, `$1"${OIDC.hub}"`), { headers: { "content-type": "text/yaml; charset=utf-8", "cache-control": "no-store" } });
+  }
   // The preview picture is the same for every link and says nothing about any site, so it needs no login.
   if (url.pathname === "/_hub/og.png") return new Response(Bun.file(new URL("./og.png", import.meta.url).pathname), { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
   if (req.method === "GET" && PREVIEW_BOTS.test(req.headers.get("user-agent") ?? "") && !sessionUser(req)) return previewCard(url);

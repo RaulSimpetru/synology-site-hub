@@ -243,3 +243,12 @@ test("build statuses: a step track for queued, building, failed and stopped bran
   expect(page).not.toContain("<code>gone</code>");
   expect(page).toContain("2 building · 1 failed");
 });
+
+test("the hub serves the CI template with its own address, without a login", async () => {
+  const res = await handle(new Request("http://hub.test/_hub/ci.yml"));
+  expect(res.status).toBe(200);
+  const yml = await res.text();
+  expect(yml).toContain('HUB_URL: "http://hub.test"');
+  expect(yml).toContain("hub:deploy:");
+  expect(yml).not.toContain("your-nas.example.org");
+});
