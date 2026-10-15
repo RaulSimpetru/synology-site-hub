@@ -1,5 +1,5 @@
 # synology-site-hub. Put this file and your .env (from .env.example) in one folder, then:
-#   sudo docker compose up -d          update later: sudo docker compose pull && sudo docker compose up -d
+#   sudo docker compose up -d          update later: sudo docker compose pull && sudo docker compose up -d --remove-orphans
 name: site-hub
 services:
   router:
@@ -13,10 +13,11 @@ services:
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
-      # GitLab OAuth app (scope api, redirect <hub>/_hub/gitlab) for Remove and build status; unset = neither.
+      # GitLab OAuth app (scope api, redirect <hub>/_hub/gitlab) for the Remove button; unset = no Remove.
       GITLAB_URL: ${GITLAB_URL:-}
       GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID:-}
       GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET:-}
+      HOOK_SECRET: ${HOOK_SECRET:-}
       DOCKER_API: http://docker:2375
     # DSM's default certificate (root-only files, so run as uid 0 but with no capabilities).
     volumes: ["${CERT_DIR:-/usr/syno/etc/certificate/system/default}:/certs:ro"]
@@ -33,37 +34,21 @@ services:
     networks: [internal]
     restart: unless-stopped
 
-  # Registers the runner once, from RUNNER_TOKEN in .env; does nothing once it is registered.
-  runner-setup:
-    image: gitlab/gitlab-runner:latest
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        grep -qs '\[\[runners\]\]' /etc/gitlab-runner/config.toml && exit 0
-        [ -n "$$RUNNER_TOKEN" ] || { echo "No RUNNER_TOKEN in .env yet: the hub runs, but nothing gets built (README, step 2)."; exit 0; }
-        gitlab-runner register --non-interactive --url "$$GITLAB_URL" --token "$$RUNNER_TOKEN" \
-          --executor docker --docker-image docker:27-cli \
-          --docker-volumes /var/run/docker.sock:/var/run/docker.sock --description site-hub
+  # Builds each pushed branch's Dockerfile and runs it as a site. GitLab's push hook reaches it only
+  # through the hub (/_hub/hook, checked against HOOK_SECRET); it is the one service with the Docker socket.
+  builder:
+    image: ghcr.io/raulsimpetru/synology-site-hub:${HUB_VERSION:-latest}
+    command: ["bun", "builder.ts"]
     environment:
       GITLAB_URL: ${GITLAB_URL:-}
-      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
-    volumes: ["${RUNNER_CONFIG:-runner-config}:/etc/gitlab-runner"]
-    restart: "no"
-
-  # Runs the site-hub CI jobs. They get the Docker socket, so the runner only takes jobs tagged
-  # site-hub (set when you create it in GitLab), from projects it is enabled for.
-  runner:
-    image: gitlab/gitlab-runner:latest
-    depends_on:
-      runner-setup: { condition: service_completed_successfully }
-    volumes:
-      - ${RUNNER_CONFIG:-runner-config}:/etc/gitlab-runner
-      - /var/run/docker.sock:/var/run/docker.sock
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      HOOK_SECRET: ${HOOK_SECRET:-}
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    user: "0"
+    networks: [internal, egress]
     restart: unless-stopped
 
-volumes:
-  runner-config:
-
 networks:
-  sites: { name: sites }          # CI attaches every site container here
-  internal: { internal: true }
+  sites: { name: sites }          # the builder attaches every site container here
+  internal: { internal: true }   # hub ↔ Docker API proxy ↔ builder; sites can't reach it
+  egress: {}                      # the builder's way out to GitLab and image registries

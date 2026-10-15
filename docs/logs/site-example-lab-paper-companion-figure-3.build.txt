@@ -1,0 +1,5 @@
+$ fetch example-lab/paper-companion @ 8d2f41c7
+$ docker build --pull -t site-example-lab-paper-companion-figure-3 .
+#5 [3/4] RUN bun install --frozen-lockfile
+#6 [4/4] RUN bun run build
+(demo log: in a real hub this is the live build output)

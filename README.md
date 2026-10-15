@@ -19,8 +19,9 @@ Want to share a project wiki, a demo or a paper page with your colleagues, witho
 - **Your NAS accounts.** People sign in through DSM's SSO Server, or with a shared password.
 - **Fuzzy search.** Every running branch, grouped by project; type `rv2` to find `reviewer-2`.
 - **A link for every page.** Each site lives at `/<repo>/<branch>/`, so any page can be shared, and several sites work side by side in tabs. A small "← All sites" badge leads back to the list.
-- **Remove.** Only shown to people who can push to that branch; GitLab checks and records it.
-- **Build status.** A push shows up at once with a step track (Pushed, Queued, Build, Live); a live site stays open while its update builds, and a failed build shows its error line and job log.
+- **Nothing to set up per repo.** Anyone with a GitLab repo, even under their own name, pushes a `Dockerfile` and gets a site. No CI file, no runner, no settings.
+- **Remove.** Only shown to people who can push to that branch; GitLab checks.
+- **Build status.** A push shows up at once with a step track (Pushed, Queued, Build, Live); a live site stays open while its update builds, and a failed build shows its error line and build log.
 - **Isolated sites.** No host mounts, no Linux capabilities, 1 GB of RAM each.
 - **Small.** One TypeScript file on Bun, with tests.
 
@@ -28,26 +29,28 @@ Want to share a project wiki, a demo or a paper page with your colleagues, witho
 
 ```mermaid
 flowchart LR
-  dev([git push]) --> gl[GitLab CI]
-  gl -- "builds the branch's Dockerfile<br/>on the NAS runner" --> site[(site container)]
-  user([colleague]) -- "NAS login" --> hub[hub :4300]
+  dev([git push]) --> gl[GitLab]
+  gl -- "push hook" --> hub[hub :4300]
+  hub -- "passes it on" --> builder[builder]
+  builder -- "builds the branch's<br/>Dockerfile, runs it" --> site[(site container)]
+  user([colleague]) -- "NAS login" --> hub
   hub -- "lists and proxies" --> site
 ```
 
-- **GitLab CI** builds each branch on a runner on the NAS and starts it as a container. Projects point their CI setting at the template the hub serves.
+- **GitLab** sends every push to the hub (one system hook for the whole instance, or a webhook per group or project).
+- **The builder** (`builder.ts`) downloads the pushed commit, and if it has a `Dockerfile` at the root, builds it and starts it as a locked-down container. It's the only part with the Docker socket, and no repo can change what it runs except its own Dockerfile.
 - **The hub** (`router.ts`) lists the running containers through a read-only Docker API and serves each one under its own path, rewriting the site's root-relative links to match.
-- **Removing** a preview stops its GitLab environment, which runs the template's stop job.
 
 ## What you need
 
 - A Synology NAS with **DSM 7.2+** and **Container Manager**, which provides `docker` and `docker compose`.
 - SSH access to the NAS with an account that can run `sudo`.
-- **GitLab**: self-hosted, for example on the same NAS, or gitlab.com. The runner only connects out to GitLab.
+- **GitLab**: self-hosted, for example on the same NAS, or gitlab.com. GitLab must be able to reach the hub's port to deliver push hooks.
 - Optional: DSM's **SSO Server** package, so people sign in with their NAS accounts.
 
 ## Install (about 10 minutes)
 
-The hub is one Docker Compose project: the hub itself, a read-only window onto Docker, and a GitLab runner that builds the sites. Nothing to compile or copy by hand.
+The hub is one Docker Compose project: the hub itself, a read-only window onto Docker, and the builder. Nothing to compile or copy by hand.
 
 <details open>
 <summary><b>1. Get the two files</b></summary>
@@ -67,17 +70,15 @@ No SSH? In DSM, put `compose.yaml` and `.env` in a folder with File Station, the
 </details>
 
 <details open>
-<summary><b>2. Make a runner in GitLab</b></summary>
+<summary><b>2. Connect GitLab</b></summary>
 
 <br>
 
-In GitLab, open the group that holds your websites (or a single project) → Settings → CI/CD → Runners → **New group runner**.
+1. **A token for the builder.** As a GitLab admin (on gitlab.com: an account that is a member of every site repo), go to Preferences → Access tokens and create a token with the scopes `read_api` and `read_repository`. That's `GITLAB_TOKEN`. Give it a long expiry: the builder stops building on the day it lapses.
+2. **A secret for the hook:** `openssl rand -hex 32`. That's `HOOK_SECRET`.
+3. **The push hook.** Self-hosted: Admin → System hooks → add `https://your-nas:4300/_hub/hook`, paste the secret as the Secret token, tick **Push events**. That covers every repo on the instance, including new ones. On gitlab.com: the same as a webhook on each group (or project) with your sites.
 
-- Set the tag `site-hub`.
-- Untick "Run untagged jobs".
-- Copy the `glrt-…` token.
-
-A group runner serves every project in the group. A project runner works too, but then you enable it on each project.
+> **Self-hosted GitLab on the same network:** system hooks may call local addresses by default. Project and group webhooks may not: allow the hub's host and port only, under Admin → Settings → Network → Outbound requests → `your-nas.example.org:4300`.
 
 </details>
 
@@ -91,7 +92,8 @@ Set at least these, then start it:
 ```sh
 HUB_URL=https://your-nas.example.org:4300      # as people will type it
 GITLAB_URL=https://your-gitlab.example.org     # or https://gitlab.com
-RUNNER_TOKEN=glrt-…                            # from step 2
+GITLAB_TOKEN=glpat-…                           # from step 2
+HOOK_SECRET=…                                  # from step 2
 SESSION_SECRET=…                               # output of: openssl rand -hex 32
 ```
 
@@ -102,7 +104,6 @@ sudo docker compose up -d
 - **Port:** the hub answers on port 4300; set `HUB_PORT` in `.env` to change it.
 - **HTTPS:** the hub uses DSM's default certificate, so use the hostname it's issued for.
 - **Firewall:** if DSM's firewall is on, allow the port.
-- **Runner:** it registers itself on the first start.
 
 </details>
 
@@ -121,7 +122,7 @@ Without SSO, set `HUB_PASSWORD` instead and everyone shares that password. With 
 </details>
 
 <details>
-<summary><b>5. Remove button and build status</b> (optional)</summary>
+<summary><b>5. Remove button</b> (optional)</summary>
 
 <br>
 
@@ -130,7 +131,7 @@ Without SSO, set `HUB_PASSWORD` instead and everyone shares that password. With 
 3. In `.env`, set `GITLAB_CLIENT_ID` and `GITLAB_CLIENT_SECRET`.
 4. Run `sudo docker compose up -d`.
 
-Each person is signed into GitLab once, which is usually invisible behind SSO. The hub then shows each branch's build progress, and Remove on branches they can push to. Remove stops the branch's GitLab environment *as that person*; the branch itself is never touched.
+Each person is signed into GitLab once, which is usually invisible behind SSO. The hub then shows Remove on branches they can push to. Removing takes the site down; the branch itself is never touched.
 
 </details>
 
@@ -141,27 +142,21 @@ All settings live in `.env` on the NAS; [`.env.example`](.env.example) lists the
 | Variable | Needed for | Example |
 |---|---|---|
 | `HUB_URL` | always | `https://your-nas.example.org:4300` |
-| `GITLAB_URL`, `RUNNER_TOKEN` | building sites | `https://gitlab.com`, `glrt-…` |
+| `GITLAB_URL`, `GITLAB_TOKEN`, `HOOK_SECRET` | building sites | `https://gitlab.com`, `glpat-…`, `openssl rand -hex 32` |
 | `HUB_ORG` | label at the top right | `Example Lab` |
 | `SESSION_SECRET` | staying signed in across restarts | output of `openssl rand -hex 32` |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | NAS sign-in | from DSM's SSO Server |
 | `HUB_PASSWORD` | shared password instead of SSO | |
-| `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | Remove and build status | from a GitLab OAuth app |
+| `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET` | the Remove button | from a GitLab OAuth app |
 | `HUB_PORT`, `HUB_VERSION`, `CERT_DIR` | port, image tag, certificate folder | `4300`, `latest`, DSM's default |
 
 ## Add a website
 
-1. Add a **`Dockerfile`** at the repo root whose server listens on `$PORT` (3000). [`examples/Dockerfile.bun`](examples/Dockerfile.bun) is a starting point.
-2. In the project, go to Settings → CI/CD → General pipelines, and set the **CI/CD configuration file** to `https://your-nas:4300/_hub/ci.yml`. The hub serves the build template there with its own address filled in. Don't add a `.gitlab-ci.yml` of your own.
-3. With a project runner (not a group runner): Settings → CI/CD → Runners → **enable the `site-hub` runner**.
+Add a **`Dockerfile`** at the repo root whose server listens on `$PORT` (3000), and push. [`examples/Dockerfile.bun`](examples/Dockerfile.bun) is a starting point. That's all: no CI file, no runner, no settings.
 
-> **Self-hosted GitLab on the same network** blocks fetching from local addresses by default. Allow the hub's host and port only: Admin → Settings → Network → Outbound requests → add `your-nas.example.org:4300` to the allowlist.
->
-> If GitLab can't fetch the template from the hub (no network path, or a self-signed certificate), put [`review.gitlab-ci.yml`](review.gitlab-ci.yml) in a GitLab project of its own, set its `HUB_URL`, and use `review.gitlab-ci.yml@<group>/<project>` instead.
+The site appears at `https://your-nas:4300/<repo>/<branch>/` (the branch name as GitLab slugs it, e.g. `feature/x` → `feature-x`), every push updates it, and deleting the branch or the repo takes it down. Repos without a root `Dockerfile` are ignored.
 
-Then push a branch. It appears at `https://your-nas:4300/<repo>/<branch>/` (the branch name as GitLab slugs it, e.g. `feature/x` → `feature-x`). The pipeline's environment URL leads there too.
-
-> **Secrets:** add a CI/CD variable `SITE_ENV_<NAME>` (masked, not protected). The site receives it as `<NAME>`, so `SITE_ENV_SMTP_PASS` becomes `SMTP_PASS`. It's written after `docker build`, so it never ends up in the image.
+> **Secrets:** add a CI/CD variable `SITE_ENV_<NAME>` (Settings → CI/CD → Variables, masked). The site receives it as `<NAME>`, so `SITE_ENV_SMTP_PASS` becomes `SMTP_PASS`. It's passed when the container starts, so it never ends up in the image. A new variable takes effect on the next push.
 
 ## Limits
 
@@ -170,16 +165,19 @@ Then push a branch. It appears at `https://your-nas:4300/<repo>/<branch>/` (the 
 - **No persistent storage.** Whatever a site writes to disk is gone on its next deploy, so send data elsewhere, for example by email.
 - **CPU priority, not a cap.** The Synology kernel can't hard-limit CPU, so sites get a lower priority instead.
 
+- **One build at a time,** 20 minutes at most each, so a burst of pushes can't swamp the NAS.
+- **Every repo with a root Dockerfile becomes a site,** on every branch. A repo that has one for another purpose shows up too, until its Dockerfile moves out of the root.
+
 > [!IMPORTANT]
-> The CI jobs hold the Docker socket, which is root on the NAS. That's why projects use the hub's CI template instead of their own, and branches can only supply a Dockerfile.
-> - Enable the runner only for projects set up as in [Add a website](#add-a-website).
-> - Give people the **Developer** role on site projects. A Maintainer could point the project back at its own CI file.
+> Only the builder holds the Docker socket, which is root on the NAS, and it only ever runs `docker build` and a fixed `docker run` with no host mounts and no capabilities. Anyone who can push a repo can still run code on the NAS *inside* a build or a site container, so only connect a GitLab whose users you trust that far. `GITLAB_TOKEN` can read every repo: keep `.env` at `chmod 600`.
 
 ## Updating
 
 ```sh
-sudo docker compose pull && sudo docker compose up -d
+sudo docker compose pull && sudo docker compose up -d --remove-orphans
 ```
+
+`--remove-orphans` clears out the GitLab runner that versions before the builder used; then delete that runner in GitLab and clear the projects' CI/CD configuration file setting.
 
 Every push to `main` here publishes a new image to `ghcr.io/raulsimpetru/synology-site-hub`. To stay on one version, set `HUB_VERSION` to a commit hash.
 

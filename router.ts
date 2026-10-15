@@ -1,8 +1,10 @@
-// Site hub: lists the site containers that GitLab CI started (label hub.site) and serves each one
+// Site hub: lists the site containers the builder started (label hub.site) and serves each one
 // under its own path, /<repo>/<branch>/, so every page of every site has a link of its own.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const DOCKER = process.env.DOCKER_API ?? "http://docker:2375";
+const BUILDER = process.env.BUILDER_API ?? "http://builder:8081";
+const HOOK_SECRET = process.env.HOOK_SECRET ?? "";
 const PASSWORD = process.env.HUB_PASSWORD ?? "";
 const COOKIE = "hub_site";
 const ORG = process.env.HUB_ORG ?? ""; // shown top right, e.g. "Example Lab, Berlin"
@@ -47,7 +49,7 @@ export async function listSites(force = false) {
   return cache;
 }
 
-// GitLab's CI_COMMIT_REF_SLUG: names the review/<slug> environment and the site's path.
+// GitLab's CI_COMMIT_REF_SLUG, as builder.ts names containers: the branch part of the site's path.
 function refSlug(ref: string) {
   return ref.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 }
@@ -59,37 +61,16 @@ function ago(ms: number) {
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
 
-// One row per branch: a running site, a pipeline still on its way, or both (a live site being updated).
-type Pipeline = { id: number; ref: string; sha: string; status: string; created_at: string; web_url: string; error?: string; job?: string; title?: string };
-type Row = { project: string; branch: string; site?: Site; pipe?: Pipeline; at: number };
-const QUEUED = new Set(["created", "waiting_for_resource", "preparing", "pending", "scheduled"]);
-const pipeCache = new Map<string, { at: number; list: Pipeline[] }>();
+// One row per branch: a running site, a build still on its way, or both (a live site being updated).
+type Build = { site: string; project: string; branch: string; sha: string; title: string; url: string; state: "queued" | "building" | "failed"; at: number; started?: number; error?: string };
+type Row = { project: string; branch: string; site?: Site; pipe?: Build; at: number };
 
-// The latest pipeline of each branch (GitLab's scope=branches), seen through the visitor's own GitLab sign-in.
-async function pipelines(token: string, project: string) {
-  const key = `${token}|${project}`;
-  const hit = pipeCache.get(key);
-  if (hit && Date.now() - hit.at < 8_000) return hit.list;
-  if (pipeCache.size > 2000) pipeCache.clear();
-  const res = await gl(token, `projects/${encodeURIComponent(project)}/pipelines?scope=branches&per_page=100`).catch(() => undefined);
-  const list = (res?.ok ? await res.json() : []) as Pipeline[];
-  // The commit message of every build on its way, so a brand-new branch has a title too.
-  await Promise.all(list.filter((p) => QUEUED.has(p.status) || p.status === "running" || p.status === "failed").map(async (p) => {
-    const c = await gl(token, `projects/${encodeURIComponent(project)}/repository/commits/${p.sha}`).catch(() => undefined);
-    if (c?.ok) p.title = ((await c.json()) as { title?: string }).title;
-  }));
-  // For a failed build, the failing job and the last error line of its log.
-  await Promise.all(list.filter((p) => p.status === "failed").map(async (p) => {
-    const jobs = await gl(token, `projects/${encodeURIComponent(project)}/pipelines/${p.id}/jobs?scope[]=failed`).catch(() => undefined);
-    const job = jobs?.ok ? ((await jobs.json()) as { id: number; web_url: string }[])[0] : undefined;
-    if (!job) return;
-    p.job = job.web_url;
-    const trace = await gl(token, `projects/${encodeURIComponent(project)}/jobs/${job.id}/trace`).catch(() => undefined);
-    const lines = trace?.ok ? (await trace.text()).replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").split("\n").map((l) => l.replace(/^section_\w+:\d+:\S+\r?/, "").trim()).filter(Boolean) : [];
-    p.error = [...lines].reverse().find((l) => /error|failed|not found|cannot/i.test(l) && !/^ERROR: Job failed/.test(l)) ?? lines.at(-1);
-  }));
-  pipeCache.set(key, { at: Date.now(), list });
-  return list;
+// Queued, building and failed builds, from the builder (builder.ts); an unreachable builder just shows none.
+const builder = (path: string, method = "GET") =>
+  fetch(`${BUILDER}${path}`, { method, headers: { "x-gitlab-token": HOOK_SECRET }, signal: AbortSignal.timeout(3000) });
+async function builds() {
+  const res = await builder("/status").catch(() => undefined);
+  return (res?.ok ? await res.json() : []) as Build[];
 }
 
 const STEPS = ["Pushed", "Queued", "Build", "Live"];
@@ -97,7 +78,7 @@ const STEPS = ["Pushed", "Queued", "Build", "Live"];
 function track(states: string[], note?: string) {
   return `<div class="track">${states.map((k, i) => `<span class="st ${k}">${STEPS[i]}${k === "now" && note ? ` ${note}` : ""}${k === "done" ? " ✓" : k === "fail" ? " ✕" : ""}</span>`).join("")}</div>`;
 }
-const since = (iso: string) => { const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const since = (ms: number) => { const s = Math.max(0, Math.round((Date.now() - ms) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 export async function hubPage(current?: string, user?: string, glToken?: string) {
   const { sites, error } = await listSites(true);
@@ -109,19 +90,11 @@ export async function hubPage(current?: string, user?: string, glToken?: string)
     const project = s.labels["hub.project"] ?? "other", branch = s.labels["hub.branch"] ?? s.name;
     rows.set(`${project}\n${branch}`, { project, branch, site: s, at: s.created });
   }
-  // Projects the hub already knows, so a brand-new branch shows up while its first build runs.
-  if (glToken) {
-    const known = [...new Set([...rows.values()].map((r) => r.project))];
-    await Promise.all(known.map(async (project) => {
-      for (const p of await pipelines(glToken, project)) {
-        const row = rows.get(`${project}\n${p.ref}`);
-        const fresh = !row?.site || !p.sha.startsWith(row.site.labels["hub.commit"] ?? "\0");
-        const active = QUEUED.has(p.status) || p.status === "running" || p.status === "failed";
-        if (!fresh || !active) continue;
-        if (row) row.pipe = p;
-        else rows.set(`${project}\n${p.ref}`, { project, branch: p.ref, pipe: p, at: Date.parse(p.created_at) });
-      }
-    }));
+  // Builds on their way, so a brand-new branch shows up while its first build runs.
+  for (const b of await builds()) {
+    const row = rows.get(`${b.project}\n${b.branch}`);
+    if (row) row.pipe = b;
+    else rows.set(`${b.project}\n${b.branch}`, { project: b.project, branch: b.branch, pipe: b, at: b.at });
   }
   const projects = new Map<string, Row[]>();
   for (const r of [...rows.values()].sort((a, b) => b.at - a.at)) projects.set(r.project, [...(projects.get(r.project) ?? []), r]);
@@ -134,24 +107,25 @@ export async function hubPage(current?: string, user?: string, glToken?: string)
     const here = s && s.name === current;
     const live = up && !(s && removing.has(s.name));
     let steps = "", meta = "";
-    if (p && QUEUED.has(p.status)) { building++; steps = track(["done", "now", "todo", "todo"]); }
-    else if (p && p.status === "running") { building++; steps = track(["done", "done", "now", "todo"], since(p.created_at)); }
+    if (p?.state === "queued") { building++; steps = track(["done", "now", "todo", "todo"]); }
+    else if (p?.state === "building") { building++; steps = track(["done", "done", "now", "todo"], since(p.started ?? p.at)); }
     else if (p) { failed++; steps = track(["done", "done", "fail", "todo"]); }
     else if (s && !up) steps = track(["done", "done", "done", "fail"]);
     const sha = p?.sha.slice(0, 8);
-    if (p && s) meta = `live: <span class="mono">${esc(l["hub.commit"])}</span> · ${p.status === "failed" ? "failed" : "building"}: <a class="mono" href="${esc(p.web_url)}">${esc(sha)}</a>${p.title ? ` “${esc(p.title)}”` : ""}`;
-    else if (p) meta = `<a class="mono" href="${esc(p.web_url)}">${esc(sha)}</a> · pushed ${ago(Date.parse(p.created_at))}`;
+    if (p && s) meta = `live: <span class="mono">${esc(l["hub.commit"])}</span> · ${p.state === "failed" ? "failed" : p.state}: <a class="mono" href="${esc(p.url)}">${esc(sha)}</a>${p.title ? ` “${esc(p.title)}”` : ""}`;
+    else if (p) meta = `<a class="mono" href="${esc(p.url)}">${esc(sha)}</a> · pushed ${ago(p.at)}`;
     else meta = `${esc(l["hub.author"]?.replace(/\s*<.*>$/, ""))} · <a class="mono" href="${esc(l["hub.url"])}">${esc(l["hub.commit"])}</a> · <a href="/_hub/logs/${esc(s!.name)}">logs</a>`;
     if (s && !up) meta += ` · stopped: ${esc(s.status)}`;
-    const err = p?.status === "failed" && p.error ? `<pre class="error">${esc(p.error)}</pre>` : "";
+    const err = p?.state === "failed" && p.error ? `<pre class="error">${esc(p.error)}</pre>` : "";
     const main = s && removing.has(s.name) ? '<span class="down">Removing…</span>'
       : live ? `<a class="open" href="${esc(s!.path)}/">Open →</a>`
       : s ? `<a class="open quiet" href="/_hub/logs/${esc(s.name)}">Logs</a>`
       : '<span class="notyet">Not live yet</span>';
-    const second = p?.status === "failed" ? `<a class="side" href="${esc(p.job ?? p.web_url)}">Job log ↗</a>`
-      : p ? `<a class="side" href="${esc(p.web_url)}">Watch log ↗</a>`
+    const buildLog = p && `/_hub/build/${esc(p.site)}`;
+    const second = p?.state === "failed" ? `<a class="side" href="${buildLog}">Build log</a>`
+      : p?.state === "building" ? `<a class="side" href="${buildLog}">Watch log</a>`
       : s && removable.has(s.name) && !removing.has(s.name) ? `<button type="button" class="rm" data-site="${esc(s.name)}" data-branch="${esc(branch)}" data-project="${esc(project)}">Remove</button>` : "";
-    return `<li${here ? ' class="here"' : ""}${p && p.status !== "failed" ? " data-active" : ""}>
+    return `<li${here ? ' class="here"' : ""}${p && p.state !== "failed" ? " data-active" : ""}>
   <span class="no">${String(++n).padStart(2, "0")}</span>
   <div class="what"><code>${esc(branch)}</code>${here ? '<em>Last viewed</em>' : ""}
     <p>${esc(l["hub.title"] ?? p?.title ?? "")}</p>
@@ -246,9 +220,8 @@ ${GITLAB && !glToken ? '<p class="lede"><a href="/_hub/gitlab/login">Sign in to 
 <li>The preview goes offline for everyone, and links to it stop working.</li>
 <li>Anything the site saved while running (form messages, sign-ups, uploads) is deleted with it.</li>
 <li>The branch and its code in GitLab are not touched.</li>
-<li>To bring it back, push to the branch again or re-run its pipeline; it is up again in about two minutes.</li>
+<li>To bring it back, push to the branch again; it is up again in about two minutes.</li>
 </ul>
-<p class="who">GitLab records that you stopped it (Operate → Environments).</p>
 <div class="btns"><button type="submit" formmethod="dialog" value="cancel" class="cancel" autofocus>Cancel</button><button type="submit" class="go">Remove preview</button></div>
 </form></dialog>
 <footer class="foot"><span class="sig"><a href="https://github.com/RaulSimpetru/synology-site-hub" style="text-decoration:none">site-hub</a> by <b>Raul C. Sîmpetru</b></span><span>${sites.size} site${sites.size === 1 ? "" : "s"}${building ? ` · ${building} building` : ""}${failed ? ` · ${failed} failed` : ""} · ${esc(new URL(OIDC.hub).host)}</span></footer>
@@ -432,9 +405,8 @@ export function authorizedFor(req: Request, password: string) {
   return timingSafeEqual(digest(given), digest(password));
 }
 
-// Removing a preview: GitLab decides. The hub signs each person into GitLab (OAuth, same SSO, so usually no prompt)
-// and acts as them: Remove shows only where they can push to the branch, and it stops the GitLab environment,
-// which runs the template's hub:stop job. Off unless a GitLab OAuth app is configured.
+// Removing a preview: GitLab decides. The hub signs each person into GitLab (OAuth, same SSO, so usually no prompt):
+// Remove shows only where they can push to the branch. Off unless a GitLab OAuth app is configured.
 const GL = {
   url: process.env.GITLAB_URL ?? "",
   id: process.env.GITLAB_CLIENT_ID ?? "",
@@ -450,7 +422,6 @@ const glToken = (req: Request) => {
 const gl = (token: string, path: string, method = "GET") =>
   fetch(`${GL.url}/api/v4/${path}`, { method, headers: { authorization: `Bearer ${token}` } });
 const glProject = (s: Site) => encodeURIComponent(s.labels["hub.project"] ?? "");
-// GitLab's CI_COMMIT_REF_SLUG, which names the review/<slug> environment.
 
 const pushCache = new Map<string, { at: number; ok: boolean }>();
 async function canRemove(token: string, s: Site, fresh = false) {
@@ -505,10 +476,8 @@ async function remove(req: Request, name: string) {
   const token = glToken(req);
   const s = (await listSites(true)).sites.get(name);
   if (!token || !s || !(await canRemove(token, s, true))) return new Response("Only people who can push to this branch can remove its preview.", { status: 403 });
-  const envs = await gl(token, `projects/${glProject(s)}/environments?states=available&name=${encodeURIComponent(`review/${refSlug(s.labels["hub.branch"] ?? "")}`)}`);
-  const env = envs.ok ? ((await envs.json()) as { id: number }[])[0] : undefined;
-  const stop = env && (await gl(token, `projects/${glProject(s)}/environments/${env.id}/stop`, "POST"));
-  if (!stop?.ok) return new Response("GitLab would not stop this environment. Try GitLab → Operate → Environments.", { status: 502 });
+  const res = await builder(`/remove/${encodeURIComponent(name)}`, "POST").catch(() => undefined);
+  if (!res?.ok) return new Response("The builder is not answering, so the preview is still up. Try again in a minute.", { status: 502 });
   removing.add(name);
   return new Response(null, { status: 303, headers: { location: "/_hub" } });
 }
@@ -530,11 +499,11 @@ function previewCard(url: URL) {
 
 export async function handle(req: Request) {
   const url = new URL(req.url);
-  // The CI template for site projects, with this hub's address filled in: point a project's CI/CD
-  // configuration file at <hub>/_hub/ci.yml. Public, because GitLab fetches it without a login.
-  if (url.pathname === "/_hub/ci.yml") {
-    const yml = await Bun.file(new URL("./review.gitlab-ci.yml", import.meta.url).pathname).text();
-    return new Response(yml.replace(/^(\s*HUB_URL:\s*).*$/m, `$1"${OIDC.hub}"`), { headers: { "content-type": "text/yaml; charset=utf-8", "cache-control": "no-store" } });
+  // GitLab's push hooks go straight on to the builder, which checks their secret token. Without a login, because
+  // GitLab has none; the only other way to the builder is through the hub's own calls below.
+  if (url.pathname === "/_hub/hook" && req.method === "POST") {
+    const res = await fetch(`${BUILDER}/hook`, { method: "POST", headers: { "x-gitlab-token": req.headers.get("x-gitlab-token") ?? "", "content-type": "application/json" }, body: req.body }).catch(() => undefined);
+    return new Response(res?.ok ? "ok" : "builder unavailable", { status: res?.status ?? 502 });
   }
   // The preview picture is the same for every link and says nothing about any site, so it needs no login.
   if (url.pathname === "/_hub/og.png") return new Response(Bun.file(new URL("./og.png", import.meta.url).pathname), { headers: { "content-type": "image/png", "cache-control": "public, max-age=86400" } });
@@ -561,11 +530,16 @@ export async function handle(req: Request) {
   if (GITLAB && url.pathname === "/_hub/gitlab/login") return glLogin();
   const rm = url.pathname.match(/^\/_hub\/remove\/([\w.-]+)$/);
   if (GITLAB && rm) return remove(req, rm[1]);
-  // Old-style links (and GitLab's environment URL) still work: they go to the site's own path.
+  // Old-style links still work: they go to the site's own path.
   const open = url.pathname.match(/^\/_hub\/open\/([\w.-]+)$/);
   if (open) {
     const s = (await listSites(true)).sites.get(open[1]);
     return s ? new Response(null, { status: 302, headers: { location: s.path + "/" } }) : new Response("No such site", { status: 404 });
+  }
+  const build = url.pathname.match(/^\/_hub\/build\/(site-[\w.-]+)$/);
+  if (build) {
+    const res = await builder(`/log/${build[1]}`).catch(() => undefined);
+    return new Response(res?.ok ? await res.text() : "The builder is not answering.", { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   }
   const logs = url.pathname.match(/^\/_hub\/logs\/([\w.-]+)$/);
   if (logs) {

@@ -19,7 +19,6 @@ const sso = Bun.serve({
   },
 });
 // Fake GitLab: alice may push to main, nobody to "locked".
-const stopped: string[] = [];
 const gitlab = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -32,20 +31,6 @@ const gitlab = Bun.serve({
     if (req.headers.get("authorization") !== "Bearer alice-token") return new Response("401", { status: 401 });
     const branch = url.pathname.match(/^\/api\/v4\/projects\/g%2Fp\/repository\/branches\/(.+)$/);
     if (branch) return Response.json({ can_push: branch[1] === "main" });
-    if (url.pathname === "/api/v4/projects/g%2Fp/environments" && url.searchParams.get("name") === "review/main") return Response.json([{ id: 7 }]);
-    const now = new Date(Date.now() - 72_000).toISOString();
-    if (url.pathname === "/api/v4/projects/g%2Fp/pipelines") return Response.json([
-      { id: 1, ref: "main", sha: "aaaa1111ffff", status: "success", created_at: now, web_url: "http://gl/p/1" },
-      { id: 2, ref: "locked", sha: "cccc3333ffff", status: "failed", created_at: now, web_url: "http://gl/p/2" },
-      { id: 3, ref: "fresh-idea", sha: "dddd4444ffff", status: "running", created_at: now, web_url: "http://gl/p/3" },
-      { id: 4, ref: "waiting", sha: "eeee5555ffff", status: "pending", created_at: now, web_url: "http://gl/p/4" },
-      { id: 5, ref: "gone", sha: "ffff6666ffff", status: "success", created_at: now, web_url: "http://gl/p/5" },
-    ]);
-    const commit = url.pathname.match(/^\/api\/v4\/projects\/g%2Fp\/repository\/commits\/(\w+)$/);
-    if (commit) return Response.json({ title: `Commit ${commit[1].slice(0, 4)}` });
-    if (url.pathname === "/api/v4/projects/g%2Fp/pipelines/2/jobs") return Response.json([{ id: 21, web_url: "http://gl/job/21" }]);
-    if (url.pathname === "/api/v4/projects/g%2Fp/jobs/21/trace") return new Response("\x1b[32;1m$ bun run build\x1b[0;m\nerror: Could not resolve \"three\"\nERROR: Job failed: exit code 1\n");
-    if (url.pathname === "/api/v4/projects/g%2Fp/environments/7/stop" && req.method === "POST") { stopped.push("main"); return Response.json({}); }
     return new Response("?", { status: 404 });
   },
 });
@@ -55,6 +40,22 @@ const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   if (url.pathname === "/old") return new Response(null, { status: 302, headers: { location: "/new" } });
   return new Response(`path=${url.pathname} prefix=${req.headers.get("x-forwarded-prefix")} cookies=${req.headers.get("cookie")}`);
 } });
+// Fake builder: a few builds on their way; records removals and forwarded hooks.
+const removed: string[] = [], hooks: string[] = [];
+const started = Date.now() - 72_000;
+const builder = Bun.serve({
+  port: 0,
+  async fetch(req) {
+    const url = new URL(req.url);
+    if (req.headers.get("x-gitlab-token") !== "hooksecret") return new Response("Forbidden", { status: 403 });
+    const b = (branch: string, sha: string, state: string) => ({ site: `site-g-p-${branch}`, project: "g/p", branch, sha, title: `Commit ${sha.slice(0, 4)}`, url: `http://gl/c/${sha}`, state, at: started, started });
+    if (url.pathname === "/status") return Response.json([b("locked", "cccc3333ffff", "failed"), b("fresh-idea", "dddd4444ffff", "building"), b("waiting", "eeee5555ffff", "queued")].map((x) => x.state === "failed" ? { ...x, error: 'error: Could not resolve "three"' } : x));
+    if (url.pathname === "/log/site-g-p-fresh-idea") return new Response("$ docker build\nstep 3/7\n");
+    if (url.pathname.startsWith("/remove/") && req.method === "POST") { removed.push(url.pathname.slice(8)); return new Response("removed"); }
+    if (url.pathname === "/hook" && req.method === "POST") { hooks.push(await req.text()); return new Response("ok"); }
+    return new Response("?", { status: 404 });
+  },
+});
 const docker = Bun.serve({
   port: 0,
   fetch: () => Response.json([{ Names: ["/127.0.0.1"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": String(site.port), "hub.project": "g/p", "hub.branch": "main", "hub.commit": "aaaa1111", "hub.title": "Main site" } },
@@ -63,6 +64,7 @@ const docker = Bun.serve({
 Object.assign(process.env, {
   OIDC_ISSUER: `http://localhost:${sso.port}`, OIDC_CLIENT_ID: "hub", OIDC_CLIENT_SECRET: "s3cret",
   HUB_URL: "http://hub.test", DOCKER_API: `http://localhost:${docker.port}`,
+  BUILDER_API: `http://localhost:${builder.port}`, HOOK_SECRET: "hooksecret",
   GITLAB_URL: `http://localhost:${gitlab.port}`, GITLAB_CLIENT_ID: "glhub", GITLAB_CLIENT_SECRET: "glsecret",
 });
 const { handle } = await import("./router");
@@ -150,7 +152,7 @@ test("root-relative requests from a site's own script reach that site", async ()
   expect(await (await req("/api/data", { cookie: session + "; hub_site=127.0.0.1" })).text()).toContain("path=/api/data");
 });
 
-test("Remove shows only where GitLab says you can push, and stops the environment as you", async () => {
+test("Remove shows only where GitLab says you can push, and has the builder take the site down", async () => {
   const session = setCookies(await signIn());
   const bounce = await get("/_hub", session);
   const auth = new URL(bounce.headers.get("location")!);
@@ -163,9 +165,9 @@ test("Remove shows only where GitLab says you can push, and stops the environmen
   const post = (name: string, origin = "http://hub.test") => handle(new Request(`http://hub.test/_hub/remove/${name}`, { method: "POST", headers: { cookie, origin } }));
   expect((await post("locked-site")).status).toBe(403);
   expect((await post("127.0.0.1", "http://evil.test")).status).toBe(403);
-  expect(stopped).toEqual([]);
+  expect(removed).toEqual([]);
   expect((await post("127.0.0.1")).status).toBe(303);
-  expect(stopped).toEqual(["main"]);
+  expect(removed).toEqual(["127.0.0.1"]);
   expect(await (await get("/_hub", cookie)).text()).toContain("Removing…");
 });
 
@@ -231,24 +233,24 @@ test("build statuses: a step track for queued, building, failed and stopped bran
   expect(row("locked")).toContain('<span class="st fail">Build ✕</span>');
   expect(row("locked")).toContain("live: <span class=\"mono\">bbbb2222</span> · failed:");
   expect(row("locked")).toContain('error: Could not resolve &#34;three&#34;');
-  expect(row("locked")).toContain('href="http://gl/job/21">Job log ↗');
+  expect(row("locked")).toContain('href="/_hub/build/site-g-p-locked">Build log');
   // A new branch on its first build, and one waiting for the runner: listed before anything is deployed.
   expect(row("fresh-idea")).toContain('<span class="st now">Build 1:1');
   expect(row("fresh-idea")).toContain("Not live yet");
   expect(row("fresh-idea")).toContain("<p>Commit dddd</p>");
   expect(row("locked")).toContain("“Commit cccc”");
   expect(row("fresh-idea")).toContain("data-active");
+  expect(row("fresh-idea")).toContain('href="/_hub/build/site-g-p-fresh-idea">Watch log');
+  expect(await (await get("/_hub/build/site-g-p-fresh-idea", cookie)).text()).toContain("step 3/7");
   expect(row("waiting")).toContain('<span class="st now">Queued</span>');
-  // A branch whose preview was removed (pipeline done, no container) stays gone.
-  expect(page).not.toContain("<code>gone</code>");
   expect(page).toContain("2 building · 1 failed");
 });
 
-test("the hub serves the CI template with its own address, without a login", async () => {
-  const res = await handle(new Request("http://hub.test/_hub/ci.yml"));
-  expect(res.status).toBe(200);
-  const yml = await res.text();
-  expect(yml).toContain('HUB_URL: "http://hub.test"');
-  expect(yml).toContain("hub:deploy:");
-  expect(yml).not.toContain("your-nas.example.org");
+test("GitLab push hooks reach the builder without a login, with their token passed on", async () => {
+  const hook = (token: string) => handle(new Request("http://hub.test/_hub/hook", { method: "POST", headers: { "x-gitlab-token": token, "content-type": "application/json" }, body: '{"event_name":"push"}' }));
+  expect((await hook("wrong")).status).toBe(403);
+  expect((await hook("hooksecret")).status).toBe(200);
+  expect(hooks).toEqual(['{"event_name":"push"}']);
+  // Only POST /_hub/hook is open; the build log needs a login.
+  expect((await get("/_hub/build/site-g-p-fresh-idea")).status).toBe(302);
 });

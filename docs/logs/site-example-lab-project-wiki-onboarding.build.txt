@@ -1,0 +1,7 @@
+$ fetch example-lab/project-wiki @ c3a9e7d2
+$ docker build --pull -t site-example-lab-project-wiki-onboarding .
+#5 [3/4] RUN bun install --frozen-lockfile
+#6 [4/4] RUN bun run build
+error: Could not resolve "./sections/safety.md"
+
+build failed: error: Could not resolve "./sections/safety.md"

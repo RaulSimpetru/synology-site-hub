@@ -13,29 +13,21 @@ const docker = Bun.serve({ port: 0, fetch: () => Response.json(sites.map((s, i) 
   Names: ["/" + s.name], State: "running", Status: "Up", Created: Date.now() / 1000 - s.hours * 3600,
   Labels: { "hub.site": "1", "hub.project": s.project, "hub.branch": s.branch, "hub.title": s.title, "hub.commit": commit(i), "hub.author": s.author, "hub.url": "#" },
 }))) });
-// A pretend GitLab: the visitor may push everywhere except the thesis, so Remove shows on most rows,
-// and a few pipelines are on their way, so the build statuses show too.
-const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString();
-const PIPES: Record<string, object[]> = {
-  "example-lab/paper-companion": [
-    { id: 11, ref: "reviewer-2", sha: "5c1e0b9a2d", status: "running", created_at: ago(52), web_url: "#" },
-    { id: 12, ref: "figure-3", sha: "8d2f41c7e0", status: "pending", created_at: ago(15), web_url: "#" },
-  ],
-  "example-lab/project-wiki": [{ id: 13, ref: "onboarding", sha: "c3a9e7d215", status: "failed", created_at: ago(400), web_url: "#" }],
-  "maya/thesis-demo": [{ id: 14, ref: "defence-slides", sha: "0b7e93fa4c", status: "running", created_at: ago(95), web_url: "#" }],
-};
-const gitlab = Bun.serve({ port: 0, fetch: (req) => {
-  const path = decodeURIComponent(new URL(req.url).pathname);
-  const project = Object.keys(PIPES).find((p) => path.includes(`/projects/${p}/`));
-  if (path.endsWith("/pipelines") && project) return Response.json(PIPES[project]);
-  const sha = path.match(/\/commits\/(\w+)$/)?.[1];
-  if (sha) return Response.json({ title: { "5c1e0b9a2d": "Reply to comment 4: add the sensitivity analysis", "8d2f41c7e0": "Figure 3: interactive confusion matrix", "c3a9e7d215": "Add the lab safety section", "0b7e93fa4c": "Slides for the defence" }[sha] });
-  if (path.endsWith("/jobs")) return Response.json([{ id: 1, web_url: "#" }]);
-  if (path.endsWith("/trace")) return new Response("$ bun run build\nerror: Could not resolve \"./sections/safety.md\"\nERROR: Job failed: exit code 1\n");
-  return Response.json({ can_push: !path.includes("thesis-demo") });
-} });
+// A pretend GitLab (the visitor may push everywhere except the thesis, so Remove shows on most rows)
+// and a pretend builder with a few builds on their way, so the build statuses show too.
+const ago = (s: number) => Date.now() - s * 1000;
+const build = (project: string, branch: string, sha: string, state: string, secs: number, title: string, error?: string) =>
+  ({ site: `site-${project.replace(/[^a-z0-9]/g, "-")}-${branch}`, project, branch, sha, title, url: "#", state, at: ago(secs), started: ago(secs), error });
+const BUILDS = [
+  build("example-lab/paper-companion", "reviewer-2", "5c1e0b9a2d", "building", 52, "Reply to comment 4: add the sensitivity analysis"),
+  build("example-lab/paper-companion", "figure-3", "8d2f41c7e0", "queued", 15, "Figure 3: interactive confusion matrix"),
+  build("example-lab/project-wiki", "onboarding", "c3a9e7d215", "failed", 400, "Add the lab safety section", 'error: Could not resolve "./sections/safety.md"'),
+  build("maya/thesis-demo", "defence-slides", "0b7e93fa4c", "queued", 95, "Slides for the defence"),
+];
+const builder = Bun.serve({ port: 0, fetch: () => Response.json(BUILDS) });
+const gitlab = Bun.serve({ port: 0, fetch: (req) => Response.json({ can_push: !new URL(req.url).pathname.includes("thesis-demo") }) });
 Object.assign(process.env, {
-  DOCKER_API: `http://localhost:${docker.port}`, HUB_URL: "https://your-nas.example.org:4300", HUB_ORG: "Example Lab",
+  DOCKER_API: `http://localhost:${docker.port}`, BUILDER_API: `http://localhost:${builder.port}`, HUB_URL: "https://your-nas.example.org:4300", HUB_ORG: "Example Lab",
   GITLAB_URL: `http://localhost:${gitlab.port}`, GITLAB_CLIENT_ID: "demo", GITLAB_CLIENT_SECRET: "demo", OIDC_CLIENT_ID: "",
 });
 const { hubPage, badge, listSites } = await import("../router");
@@ -61,6 +53,8 @@ html = html
   .replace('<a href="/_hub/logout">Sign out →</a>', '<a href="./">About →</a>')
   .replace("<body><main>", "<body>" + DEMO + "<main>")
   .replace("</body></html>", SCRIPT + "</body></html>");
+html = html.replace(/href="\/_hub\/build\/([\w.-]+)"/g, 'href="logs/$1.build.txt"');
+for (const b of BUILDS) await Bun.write(`docs/logs/${b.site}.build.txt`, `$ fetch ${b.project} @ ${b.sha.slice(0, 8)}\n$ docker build --pull -t ${b.site} .\n#5 [3/4] RUN bun install --frozen-lockfile\n${b.error ? `#6 [4/4] RUN bun run build\n${b.error}\n\nbuild failed: ${b.error}` : "#6 [4/4] RUN bun run build\n(demo log: in a real hub this is the live build output)"}\n`);
 html = html.replaceAll(" data-active", ""); // the demo is static: no reloading while builds "run"
 for (const s of live.values()) html = html.replaceAll(`href="${s.path}/"`, `href="sites/${s.name}.html"`);
 await Bun.write("docs/demo.html", html);

@@ -1,2 +1,2 @@
-2026-10-12T17:09:27.889Z listening on :3000
+2026-10-13T01:04:44.952Z listening on :3000
 (demo log: in a real hub this is the last 300 lines of the site's output)

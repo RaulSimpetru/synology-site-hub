@@ -1,0 +1,5 @@
+$ fetch maya/thesis-demo @ 0b7e93fa
+$ docker build --pull -t site-maya-thesis-demo-defence-slides .
+#5 [3/4] RUN bun install --frozen-lockfile
+#6 [4/4] RUN bun run build
+(demo log: in a real hub this is the live build output)
