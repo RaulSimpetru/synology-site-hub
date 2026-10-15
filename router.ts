@@ -108,7 +108,7 @@ export async function hubPage(current?: string, user?: string, glToken?: string)
     const live = up && !(s && removing.has(s.name));
     let steps = "", meta = "";
     if (p?.state === "queued") { building++; steps = track(["done", "now", "todo", "todo"]); }
-    else if (p?.state === "building") { building++; steps = track(["done", "done", "now", "todo"], since(p.started ?? p.at)); }
+    else if (p?.state === "building") { building++; steps = track(["done", "done", "now", "todo"], `<span data-since="${p.started ?? p.at}">${since(p.started ?? p.at)}</span>`); }
     else if (p) { failed++; steps = track(["done", "done", "fail", "todo"]); }
     else if (s && !up) steps = track(["done", "done", "done", "fail"]);
     const sha = p?.sha.slice(0, 8);
@@ -233,6 +233,13 @@ for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
   rmdlg.querySelector(".proj").textContent = b.dataset.project;
   rmdlg.showModal();
 };
+// Build clocks tick every second.
+setInterval(() => {
+  for (const t of document.querySelectorAll("[data-since]")) {
+    const s = Math.max(0, Math.round((Date.now() - Number(t.dataset.since)) / 1000));
+    t.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+}, 1000);
 // While something builds, refresh every 10 s, unless the visitor is searching or deciding in the dialog.
 if (document.querySelector("li[data-active]")) setInterval(() => {
   if (!document.getElementById("find").value && !rmdlg.open) location.reload();

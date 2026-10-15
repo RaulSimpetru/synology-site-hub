@@ -235,7 +235,7 @@ test("build statuses: a step track for queued, building, failed and stopped bran
   expect(row("locked")).toContain('error: Could not resolve &#34;three&#34;');
   expect(row("locked")).toContain('href="/_hub/build/site-g-p-locked">Build log');
   // A new branch on its first build, and one waiting for the runner: listed before anything is deployed.
-  expect(row("fresh-idea")).toContain('<span class="st now">Build 1:1');
+  expect(row("fresh-idea")).toMatch(/<span class="st now">Build <span data-since="\d+">1:1/);
   expect(row("fresh-idea")).toContain("Not live yet");
   expect(row("fresh-idea")).toContain("<p>Commit dddd</p>");
   expect(row("locked")).toContain("“Commit cccc”");

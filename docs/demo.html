@@ -93,7 +93,7 @@ DEMO with made-up sites. Nothing here is real: search, open a site, or try Remov
     <small>live: <span class="mono">e06b12d4</span> · building: <a class="mono" href="#">5c1e0b9a</a> “Reply to comment 4: add the sensitivity analysis”</small></div>
   <span class="age">1 h ago</span>
   <span class="acts"><a class="open" href="sites/site-example-lab-paper-companion-reviewer-2.html">Open →</a><a class="side" href="logs/site-example-lab-paper-companion-reviewer-2.build.txt">Watch log</a></span>
-  <div class="track"><span class="st done">Pushed ✓</span><span class="st done">Queued ✓</span><span class="st now">Build 0:52</span><span class="st todo">Live</span></div>
+  <div class="track"><span class="st done">Pushed ✓</span><span class="st done">Queued ✓</span><span class="st now">Build <span data-since="1792041605850">0:52</span></span><span class="st todo">Live</span></div>
 </li>
 <li class="here">
   <span class="no">03</span>
@@ -165,6 +165,13 @@ for (const b of document.querySelectorAll(".rm")) b.onclick = () => {
   rmdlg.querySelector(".proj").textContent = b.dataset.project;
   rmdlg.showModal();
 };
+// Build clocks tick every second.
+setInterval(() => {
+  for (const t of document.querySelectorAll("[data-since]")) {
+    const s = Math.max(0, Math.round((Date.now() - Number(t.dataset.since)) / 1000));
+    t.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+}, 1000);
 // While something builds, refresh every 10 s, unless the visitor is searching or deciding in the dialog.
 if (document.querySelector("li[data-active]")) setInterval(() => {
   if (!document.getElementById("find").value && !rmdlg.open) location.reload();
