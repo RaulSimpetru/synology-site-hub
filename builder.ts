@@ -20,9 +20,20 @@ let current: (Job & { started: number }) | undefined;
 const failed = new Map<string, Job & { error: string }>();
 const logs = new Map<string, string>();
 
-// GitLab's CI_PROJECT_PATH_SLUG / CI_COMMIT_REF_SLUG, so container names match the ones CI used to make.
+// GitLab's former CI names, used only to retire containers when their replacement starts.
 export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
-export const siteName = (project: string, branch: string) => `site-${slug(project)}-${slug(branch)}`;
+const legacySiteName = (project: string, branch: string) => `site-${slug(project)}-${slug(branch)}`;
+// UUIDv5(URL namespace, "https://github.com/RaulSimpetru/synology-site-hub"). Keep this namespace stable.
+const SITE_NAMESPACE = Buffer.from("942dca826d4a52f39b91a2f1e00c1937", "hex");
+export function siteName(project: string, branch: string) {
+  // A stable UUIDv5 for the full identity: 41 characters including "site-", within DNS's 63.
+  // Labels carry the readable names and public paths; no slugging or truncation enters the UUID.
+  const bytes = createHash("sha1").update(SITE_NAMESPACE).update(JSON.stringify([project, branch])).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `site-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 const gl = (path: string, method = "GET") => fetch(`${GITLAB}/api/v4/${path}`, { method, headers: { "private-token": TOKEN } });
 
@@ -42,6 +53,14 @@ export async function removeSite(site: string) {
   logs.delete(site);
   await run(["rm", "-f", site]).catch(() => {});
   await run(["rmi", site]).catch(() => {});
+}
+
+async function removeLegacySite(project: string, branch: string) {
+  const legacy = legacySiteName(project, branch);
+  // Old slugs can collide. Only remove an old container labelled as this exact project and branch.
+  const labels = await run(["inspect", "--type", "container", "--format", "{{json .Config.Labels}}", legacy])
+    .then((out) => JSON.parse(out)).catch(() => undefined);
+  if (labels?.["hub.site"] === "1" && labels["hub.project"] === project && labels["hub.branch"] === branch) await removeSite(legacy);
 }
 
 // Project CI/CD variables named SITE_ENV_<NAME> reach the site as <NAME>, at run time only, so no secret is in the image.
@@ -76,6 +95,8 @@ async function deploy(j: Job, log: (s: string) => void) {
       "--label", "hub.site=1", "--label", "hub.port=3000", "--label", `hub.project=${j.project}`, "--label", `hub.branch=${j.branch}`,
       "--label", `hub.commit=${j.sha.slice(0, 8)}`, "--label", `hub.title=${j.title}`, "--label", `hub.author=${j.author}`, "--label", `hub.url=${j.url}`,
       j.site], log);
+    // Retain the previous container if building or starting its replacement fails.
+    await removeLegacySite(j.project, j.branch);
     if (old && old !== (await run(["image", "inspect", "-f", "{{.Id}}", j.site]).catch(() => old))) await run(["rmi", old]).catch(() => {});
     log("live\n");
   } finally {
@@ -118,7 +139,7 @@ export async function onHook(body: any) {
   if (kind !== "push" || !project || !String(body.ref ?? "").startsWith("refs/heads/")) return "ignored";
   const branch = body.ref.slice("refs/heads/".length);
   const site = siteName(project, branch);
-  if (ZERO.test(body.after ?? "")) { await removeSite(site); return "removed"; }
+  if (ZERO.test(body.after ?? "")) { await removeSite(site); await removeLegacySite(project, branch); return "removed"; }
   const id = encodeURIComponent(project);
   const sha = String(body.after ?? body.checkout_sha);
   // Only branches with a Dockerfile at the root are sites; everything else is left alone.
