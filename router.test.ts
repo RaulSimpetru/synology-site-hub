@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { siteId } from "./site-id";
+
+const mainPath = `/${siteId("g/p", "main")}`;
 
 // Fake Synology SSO + fake Docker API + one fake site that echoes the cookies it receives.
 const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
@@ -38,6 +41,8 @@ const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const url = new URL(req.url);
   if (url.pathname === "/page") return new Response('<html><body><a href="/about">a</a><img src="/img.png" srcset="/s.png 1x, /l.png 2x"><a href="https://x.org/">x</a><a href="//cdn.x/y">c</a><a href="rel">r</a><form action="/send"></form></body></html>', { headers: { "content-type": "text/html" } });
   if (url.pathname === "/old") return new Response(null, { status: 302, headers: { location: "/new" } });
+  if (url.pathname === "/old-prefix") return new Response('<a href="/p/main/page">Page</a>', { headers: { "content-type": "text/html" } });
+  if (url.pathname === "/submit") return req.text().then((body) => new Response(`${req.method} ${body}`));
   return new Response(`path=${url.pathname} prefix=${req.headers.get("x-forwarded-prefix")} cookies=${req.headers.get("cookie")}`);
 } });
 // Fake builder: a few builds on their way; records removals and forwarded hooks.
@@ -56,18 +61,16 @@ const builder = Bun.serve({
     return new Response("?", { status: 404 });
   },
 });
-const docker = Bun.serve({
-  port: 0,
-  fetch: () => Response.json([{ Names: ["/127.0.0.1"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": String(site.port), "hub.project": "g/p", "hub.branch": "main", "hub.commit": "aaaa1111", "hub.title": "Main site" } },
-    { Names: ["/locked-site"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": "1", "hub.project": "g/p", "hub.branch": "locked", "hub.commit": "bbbb2222" } }]),
-});
+let containers = [{ Names: ["/127.0.0.1"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": String(site.port), "hub.project": "g/p", "hub.branch": "main", "hub.commit": "aaaa1111", "hub.title": "Main site" } },
+  { Names: ["/locked-site"], State: "running", Status: "Up", Created: 1, Labels: { "hub.site": "1", "hub.port": "1", "hub.project": "g/p", "hub.branch": "locked", "hub.commit": "bbbb2222", "hub.title": "Locked site" } }];
+const docker = Bun.serve({ port: 0, fetch: () => Response.json(containers) });
 Object.assign(process.env, {
   OIDC_ISSUER: `http://localhost:${sso.port}`, OIDC_CLIENT_ID: "hub", OIDC_CLIENT_SECRET: "s3cret",
   HUB_URL: "http://hub.test", DOCKER_API: `http://localhost:${docker.port}`,
   BUILDER_API: `http://localhost:${builder.port}`, HOOK_SECRET: "hooksecret",
   GITLAB_URL: `http://localhost:${gitlab.port}`, GITLAB_CLIENT_ID: "glhub", GITLAB_CLIENT_SECRET: "glsecret",
 });
-const { handle } = await import("./router");
+const { handle, listSites } = await import("./router");
 
 const get = (path: string, cookie = "") => handle(new Request(`http://hub.test${path}`, { headers: { cookie } }));
 const setCookies = (res: Response) => res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
@@ -113,43 +116,92 @@ test("no open redirect after login", async () => {
 
 test("the hub session cookie is not forwarded to sites", async () => {
   const session = setCookies(await signIn()) + "; theme=dark";
-  const body = await (await get("/p/main/", session)).text();
+  const body = await (await get(`${mainPath}/`, session)).text();
   expect(body).toContain("theme=dark");
   expect(body).not.toContain("hub_session");
 });
 
 test("proxied responses vary on the cookie, so switching sites skips the browser cache", async () => {
   const session = setCookies(await signIn());
-  const res = await get("/p/main/", session);
+  const res = await get(`${mainPath}/`, session);
   expect(res.headers.get("vary")?.toLowerCase()).toContain("cookie");
 });
 
-test("each site lives at /<repo>/<branch>/, and old /_hub/open links lead there", async () => {
+test("each site has a UUID URL even before its container is migrated", async () => {
   const session = setCookies(await signIn());
-  expect((await get("/_hub/open/127.0.0.1", session)).headers.get("location")).toBe("/p/main/");
-  expect((await get("/p/main", session)).headers.get("location")).toBe("/p/main/");
-  expect(await (await get("/p/main/deep/page?q=1", session)).text()).toContain("path=/deep/page prefix=/p/main");
+  expect((await get("/_hub/open/127.0.0.1", session)).headers.get("location")).toBe(`${mainPath}/`);
+  expect((await get(`${mainPath}?q=1`, session)).headers.get("location")).toBe(`${mainPath}/?q=1`);
+  expect(await (await get(`${mainPath}/deep/page?q=1`, session)).text()).toContain(`path=/deep/page prefix=${mainPath}`);
   expect((await get("/", session)).headers.get("location")).toBe("/_hub");
-  expect(await (await get("/_hub", session + "; hub_gl=none")).text()).toContain('href="/p/main/"');
+  const html = await (await get("/_hub", session + "; hub_gl=none")).text();
+  expect(html).toContain(`href="${mainPath}/"`);
+  expect(html).not.toContain('href="/p/main/"');
+});
+
+test("old short and namespaced links redirect to the UUID, preserving pages, queries and POST bodies", async () => {
+  const session = setCookies(await signIn());
+  for (const old of ["/p/main", "/g/p/main"]) {
+    for (const suffix of ["", "/", "/deep/page?q=a%2Fb&n=1"]) {
+      const res = await get(old + suffix, session);
+      expect(res.status).toBe(308);
+      expect(res.headers.get("location")).toBe(mainPath + (suffix || "/"));
+    }
+  }
+  const send = (path: string) => handle(new Request(`http://hub.test${path}`, { method: "POST", headers: { cookie: session }, body: "message=hello" }));
+  for (const old of ["/p/main/submit", mainPath]) {
+    const res = await send(old);
+    expect(res.status).toBe(308);
+  }
+  const moved = await send("/p/main/submit");
+  expect(await (await send(moved.headers.get("location")!)).text()).toBe("POST message=hello");
 });
 
 test("a site's root-relative links and redirects point at its own path", async () => {
   const session = setCookies(await signIn());
-  const html = await (await get("/p/main/page", session)).text();
-  for (const want of ['href="/p/main/about"', 'src="/p/main/img.png"', 'srcset="/p/main/s.png 1x, /p/main/l.png 2x"', 'action="/p/main/send"', 'href="https://x.org/"', 'href="//cdn.x/y"', 'href="rel"', 'href="/_hub"'])
+  const html = await (await get(`${mainPath}/page`, session)).text();
+  for (const want of [`href="${mainPath}/about"`, `src="${mainPath}/img.png"`, `srcset="${mainPath}/s.png 1x, ${mainPath}/l.png 2x"`, `action="${mainPath}/send"`, 'href="https://x.org/"', 'href="//cdn.x/y"', 'href="rel"', 'href="/_hub"'])
     expect(html).toContain(want);
-  expect((await get("/p/main/old", session)).headers.get("location")).toBe("/p/main/new");
+  expect((await get(`${mainPath}/old`, session)).headers.get("location")).toBe(`${mainPath}/new`);
+  expect(await (await get(`${mainPath}/old-prefix`, session)).text()).toContain(`href="${mainPath}/page"`);
 });
 
 test("root-relative requests from a site's own script reach that site", async () => {
   const session = setCookies(await signIn());
   const req = (path: string, headers: Record<string, string>) => handle(new Request(`http://hub.test${path}`, { headers: { cookie: session, ...headers } }));
-  expect(await (await req("/api/data", { referer: "http://hub.test/p/main/page" })).text()).toContain("path=/api/data");
-  const nav = await req("/control", { referer: "http://hub.test/p/main/page", "sec-fetch-mode": "navigate" });
-  expect(nav.headers.get("location")).toBe("/p/main/control");
+  for (const path of [mainPath, "/p/main"]) expect(await (await req("/api/data", { referer: `http://hub.test${path}/page` })).text()).toContain("path=/api/data");
+  const nav = await req("/control", { referer: `http://hub.test${mainPath}/page`, "sec-fetch-mode": "navigate" });
+  expect(nav.headers.get("location")).toBe(`${mainPath}/control`);
   expect((await req("/api/data", { referer: "http://evil.test/p/main/" })).headers.get("location")).toBe("/_hub");
   // No referer: the site this browser last opened.
   expect(await (await req("/api/data", { cookie: session + "; hub_site=127.0.0.1" })).text()).toContain("path=/api/data");
+});
+
+test("unknown UUID links never fall through to the last-viewed site's cookie or referer", async () => {
+  const session = setCookies(await signIn());
+  const res = await handle(new Request("http://hub.test/00000000-0000-5000-8000-000000000000/page", {
+    headers: { cookie: session + "; hub_site=127.0.0.1", referer: `http://hub.test${mainPath}/page` },
+  }));
+  expect(res.status).toBe(404);
+});
+
+test("UUID paths survive container renaming and distinguish repo-name and branch-slug collisions", async () => {
+  const original = containers;
+  const session = setCookies(await signIn());
+  try {
+    containers = [["g/p", "main"], ["other/p", "main"], ["g/p", "feature/a"], ["g/p", "feature-a"]].map(([project, branch]) => ({
+      ...original[0], Names: [`/site-${siteId(project, branch)}`], Labels: { ...original[0].Labels, "hub.project": project, "hub.branch": branch },
+    }));
+    const { sites } = await listSites(true);
+    const paths = [...sites.values()].map(s => s.path);
+    expect(new Set(paths).size).toBe(4);
+    expect(paths).toContain(mainPath);
+    expect((await get("/g/p/main/page", session)).headers.get("location")).toBe(`${mainPath}/page`);
+    expect((await get("/other/p/main/page", session)).headers.get("location")).toBe(`/${siteId("other/p", "main")}/page`);
+    expect((await get("/g/p/feature-a/", session)).status).toBe(404);
+  } finally {
+    containers = original;
+    await listSites(true);
+  }
 });
 
 test("Remove shows only where GitLab says you can push, and has the builder take the site down", async () => {
@@ -205,6 +257,10 @@ test("chat apps get a preview card built from the address, not the login page", 
   expect(card).toContain('<meta property="og:title" content="emg-website · main">');
   expect(card).toContain("Sign in with your NAS account");
   expect(await (await bot("/_hub")).text()).toContain('content="Site hub"');
+  const uuidCard = await (await bot(`${mainPath}/decomposition/`)).text();
+  expect(uuidCard).toContain('<meta property="og:title" content="Site preview">');
+  expect(uuidCard).not.toContain("Main site");
+  expect(uuidCard).toContain("Sign in with your NAS account");
   // Only what's in the URL: no site list, no commit titles.
   expect(card).not.toContain("127.0.0.1");
   // People still go to sign-in.

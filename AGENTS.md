@@ -4,7 +4,7 @@ The hub shows one live preview per git branch of every connected website, on a S
 
 ## Add a version of an existing site
 
-Push a branch. The builder deploys it in about 2 minutes, every push updates it, and deleting the branch removes it. The site lives at `<HUB_URL>/<repo>/<branch-slug>/` (`/<group>/<repo>/<branch-slug>/` if two groups share a repo name).
+Push a branch. The builder deploys it in about 2 minutes, every push updates it, and deleting the branch removes it. The site lives at `<HUB_URL>/<uuid>/`; copy the link from the hub. The UUID is stable for the full project path and branch. Previous repository/branch URLs redirect when unambiguous.
 
 ## Add a new website (another GitLab repo)
 
