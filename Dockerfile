@@ -4,6 +4,6 @@ FROM oven/bun:1-slim
 COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker:27-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 WORKDIR /app
-COPY router.ts builder.ts og.png ./
+COPY router.ts builder.ts site-id.ts og.png ./
 USER bun
 CMD ["bun", "router.ts"]

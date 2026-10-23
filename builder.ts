@@ -6,6 +6,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { siteId } from "./site-id";
 
 const GITLAB = process.env.GITLAB_URL ?? "";
 const TOKEN = process.env.GITLAB_TOKEN ?? ""; // read_api + read_repository, from an account that can read every site repo
@@ -23,17 +24,8 @@ const logs = new Map<string, string>();
 // GitLab's former CI names, used only to retire containers when their replacement starts.
 export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 const legacySiteName = (project: string, branch: string) => `site-${slug(project)}-${slug(branch)}`;
-// UUIDv5(URL namespace, "https://github.com/RaulSimpetru/synology-site-hub"). Keep this namespace stable.
-const SITE_NAMESPACE = Buffer.from("942dca826d4a52f39b91a2f1e00c1937", "hex");
-export function siteName(project: string, branch: string) {
-  // A stable UUIDv5 for the full identity: 41 characters including "site-", within DNS's 63.
-  // Labels carry the readable names and public paths; no slugging or truncation enters the UUID.
-  const bytes = createHash("sha1").update(SITE_NAMESPACE).update(JSON.stringify([project, branch])).digest().subarray(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x50;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `site-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
+// The same stable UUID identifies the container and its public URL; 41 characters fit in DNS.
+export const siteName = (project: string, branch: string) => `site-${siteId(project, branch)}`;
 
 const gl = (path: string, method = "GET") => fetch(`${GITLAB}/api/v4/${path}`, { method, headers: { "private-token": TOKEN } });
 

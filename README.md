@@ -14,11 +14,11 @@
 
 ---
 
-Want to share a project wiki, a demo or a paper page with your colleagues, without putting it on the public internet? Push a branch that has a `Dockerfile`. About two minutes later it's live at `https://your-nas:4300/<repo>/<branch>/` for everyone in your group. Every push updates it, and deleting the branch takes it down.
+Want to share a project wiki, a demo or a paper page with your colleagues, without putting it on the public internet? Push a branch that has a `Dockerfile`. About two minutes later it's live at `https://your-nas:4300/<uuid>/` for everyone in your group. Copy its link from the hub. Every push updates it, and deleting the branch takes it down.
 
 - **Your NAS accounts.** People sign in through DSM's SSO Server, or with a shared password.
 - **Fuzzy search.** Every running branch, grouped by project; type `rv2` to find `reviewer-2`.
-- **A link for every page.** Each site lives at `/<repo>/<branch>/`, so any page can be shared, and several sites work side by side in tabs. A small "← All sites" badge leads back to the list.
+- **A link for every page.** Each site lives at `/<uuid>/`, so any page can be shared, and several sites work side by side in tabs. A small "← All sites" badge leads back to the list. The hub still shows the project and branch names.
 - **Nothing to set up per repo.** Anyone with a GitLab repo, even under their own name, pushes a `Dockerfile` and gets a site. No CI file, no runner, no settings.
 - **Remove.** Only shown to people who can push to that branch; GitLab checks.
 - **Build status.** A push shows up at once with a step track (Pushed, Queued, Build, Live); a live site stays open while its update builds, and a failed build shows its error line and build log.
@@ -154,7 +154,7 @@ All settings live in `.env` on the NAS; [`.env.example`](.env.example) lists the
 
 Add a **`Dockerfile`** at the repo root whose server listens on `$PORT` (3000), and push. [`examples/Dockerfile.bun`](examples/Dockerfile.bun) is a starting point. That's all: no CI file, no runner, no settings.
 
-The site appears at `https://your-nas:4300/<repo>/<branch>/` (the branch name as GitLab slugs it, e.g. `feature/x` → `feature-x`), every push updates it, and deleting the branch or the repo takes it down. Repos without a root `Dockerfile` are ignored.
+The site appears at `https://your-nas:4300/<uuid>/`; copy its link from the hub. The UUID is derived from the full project path and branch and stays the same across rebuilds. Previous repository/branch URLs redirect to the UUID path when unambiguous. Every push updates the preview, and deleting the branch or repo takes it down. Repos without a root `Dockerfile` are ignored.
 
 > **Secrets:** add a CI/CD variable `SITE_ENV_<NAME>` (Settings → CI/CD → Variables, masked). The site receives it as `<NAME>`, so `SITE_ENV_SMTP_PASS` becomes `SMTP_PASS`. It's passed when the container starts, so it never ends up in the image. A new variable takes effect on the next push.
 

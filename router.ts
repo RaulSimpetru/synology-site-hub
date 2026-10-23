@@ -1,6 +1,7 @@
 // Site hub: lists the site containers the builder started (label hub.site) and serves each one
-// under its own path, /<repo>/<branch>/, so every page of every site has a link of its own.
+// under its stable /<uuid>/ path, so every page of every site has a link of its own.
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { siteId } from "./site-id";
 
 const DOCKER = process.env.DOCKER_API ?? "http://docker:2375";
 const BUILDER = process.env.BUILDER_API ?? "http://builder:8081";
@@ -21,7 +22,7 @@ const SESSION_KEY = process.env.SESSION_SECRET || randomBytes(32).toString("hex"
 const SESSION_MS = 12 * 3600_000;
 const SECURE = OIDC.hub.startsWith("https:") ? "; Secure" : "";
 
-type Site = { name: string; state: string; status: string; created: number; labels: Record<string, string>; path: string };
+type Site = { name: string; state: string; status: string; created: number; labels: Record<string, string>; path: string; legacyPaths: string[] };
 
 let cache: { at: number; sites: Map<string, Site>; error?: string } = { at: 0, sites: new Map() };
 
@@ -34,13 +35,16 @@ export async function listSites(force = false) {
     const sites = new Map<string, Site>();
     for (const c of (await res.json()) as any[]) {
       const name = String(c.Names?.[0] ?? "").replace(/^\//, "");
-      sites.set(name, { name, state: c.State, status: c.Status, created: c.Created * 1000, labels: c.Labels ?? {}, path: "" });
+      const labels = c.Labels ?? {};
+      sites.set(name, { name, state: c.State, status: c.Status, created: c.Created * 1000, labels,
+        path: `/${siteId(labels["hub.project"] ?? name, labels["hub.branch"] ?? name)}`, legacyPaths: [] });
     }
-    // /<repo>/<branch>, or /<group>/<repo>/<branch> when two groups have a repo of the same name.
+    // Redirect previous readable links, including namespaced links after a repo-name clash disappears.
     const repo = (s: Site) => (s.labels["hub.project"] ?? s.name).split("/").pop()!;
     for (const s of sites.values()) {
       const clash = [...sites.values()].some((o) => repo(o) === repo(s) && o.labels["hub.project"] !== s.labels["hub.project"]);
-      s.path = `/${clash ? s.labels["hub.project"] : repo(s)}/${refSlug(s.labels["hub.branch"] ?? s.name)}`;
+      const branch = refSlug(s.labels["hub.branch"] ?? s.name);
+      s.legacyPaths = [...new Set([`/${s.labels["hub.project"] ?? repo(s)}/${branch}`, ...(!clash ? [`/${repo(s)}/${branch}`] : [])])];
     }
     cache = { at: Date.now(), sites };
   } catch (error) {
@@ -49,7 +53,7 @@ export async function listSites(force = false) {
   return cache;
 }
 
-// GitLab's CI_COMMIT_REF_SLUG: the public branch path stays readable, independent of container UUIDs.
+// GitLab's CI_COMMIT_REF_SLUG, used only to recognize previous readable URLs.
 function refSlug(ref: string) {
   return ref.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 }
@@ -341,8 +345,10 @@ async function proxy(req: Request, site: Site, path: string) {
   return rw.transform(response);
 }
 
-// "/x" on a site becomes "/<repo>/<branch>/x"; other links (relative, other hosts, "//cdn…") stay as they are.
+// "/x" on a site becomes "/<uuid>/x"; other links (relative, other hosts, "//cdn…") stay as they are.
 function prefixed(site: Site, link: string) {
+  const old = site.legacyPaths.find((path) => link === path || link.startsWith(path + "/"));
+  if (old) return site.path + link.slice(old.length);
   return link.startsWith("/") && !link.startsWith("//") && !link.startsWith(site.path + "/") && link !== site.path ? site.path + link : link;
 }
 
@@ -490,13 +496,16 @@ async function remove(req: Request, name: string) {
 }
 
 // Chat apps fetch a link to show a preview, without signing in. Give them a card built only from the
-// address itself (repo and branch are in the URL anyway) instead of the NAS login page.
+// address itself instead of the NAS login page. UUID links get a generic card without site metadata.
 const PREVIEW_BOTS = /WhatsApp|facebookexternalhit|Facebot|Twitterbot|Slackbot|TelegramBot|Discordbot|LinkedInBot|SkypeUriPreview|Teams|Mattermost|redditbot|Applebot|Iframely|Embedly/i;
+const UUID_PATH = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/|$)/i;
 function previewCard(url: URL) {
   const [repo, branch] = url.pathname.split("/").filter(Boolean);
   const where = ORG ? `the site hub of ${ORG}` : "a private site hub";
-  const title = repo && branch && !repo.startsWith("_") ? `${repo} · ${branch}` : "Site hub";
-  const desc = repo && branch && !repo.startsWith("_") ? `A live preview on ${where}. Sign in with your NAS account to open it.` : `Live previews of every git branch, on ${where}.`;
+  const uuid = UUID_PATH.test(url.pathname);
+  const readable = repo && branch && !repo.startsWith("_");
+  const title = uuid ? "Site preview" : readable ? `${repo} · ${branch}` : "Site hub";
+  const desc = uuid || readable ? `A live preview on ${where}. Sign in with your NAS account to open it.` : `Live previews of every git branch, on ${where}.`;
   return new Response(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}">
 <meta property="og:site_name" content="${esc(ORG || "Site hub")}"><meta property="og:type" content="website"><meta property="og:url" content="${esc(OIDC.hub + url.pathname)}">
@@ -558,15 +567,25 @@ export async function handle(req: Request) {
   // Only names the Docker API listed are ever proxied to, so no URL or cookie can point us anywhere else.
   const { sites } = await listSites();
   const under = (p: string) => [...sites.values()].find((s) => p === s.path || p.startsWith(s.path + "/"));
+  const legacy = (p: string) => {
+    const matches = [...sites.values()].flatMap((site) => site.legacyPaths.filter((path) => p === path || p.startsWith(path + "/")).map((path) => ({ site, path })))
+      .sort((a, b) => b.path.length - a.path.length);
+    // Ambiguous old slugs must not choose one of two different branch identities.
+    return matches[0] ? matches[0].path === matches[1]?.path ? null : matches[0] : undefined;
+  };
   const site = under(url.pathname);
   if (site) {
-    if (url.pathname === site.path) return new Response(null, { status: 301, headers: { location: site.path + "/" + url.search } });
+    if (url.pathname === site.path) return new Response(null, { status: 308, headers: { location: site.path + "/" + url.search } });
     return proxy(req, site, url.pathname.slice(site.path.length));
   }
+  if (UUID_PATH.test(url.pathname)) return new Response("No such site", { status: 404 });
+  const old = legacy(url.pathname);
+  if (old === null) return new Response("Ambiguous old link; open the site from the hub", { status: 404 });
+  if (old) return new Response(null, { status: 308, headers: { location: old.site.path + (url.pathname.slice(old.path.length) || "/") + url.search } });
   // A root-relative URL the HTML rewrite couldn't reach (built by the site's JavaScript or CSS): the page that
   // asked for it says which site it belongs to; failing that, the site this browser last opened.
   const referer = req.headers.get("referer");
-  const from = referer && new URL(referer).host === url.host ? under(new URL(referer).pathname) : undefined;
+  const from = referer && new URL(referer).host === url.host ? under(new URL(referer).pathname) ?? legacy(new URL(referer).pathname)?.site : undefined;
   if (url.pathname === "/" && !from) return new Response(null, { status: 302, headers: { location: "/_hub" } });
   const target = from ?? (current ? sites.get(current) : undefined);
   if (!target) return new Response(null, { status: 302, headers: { location: "/_hub" } });
