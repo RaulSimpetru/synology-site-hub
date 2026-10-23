@@ -20,16 +20,19 @@ let current: (Job & { started: number }) | undefined;
 const failed = new Map<string, Job & { error: string }>();
 const logs = new Map<string, string>();
 
-// GitLab's CI_PROJECT_PATH_SLUG / CI_COMMIT_REF_SLUG. Keep existing names when they fit in DNS.
+// GitLab's former CI names, used only to retire containers when their replacement starts.
 export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 const legacySiteName = (project: string, branch: string) => `site-${slug(project)}-${slug(branch)}`;
+// UUIDv5(URL namespace, "https://github.com/RaulSimpetru/synology-site-hub"). Keep this namespace stable.
+const SITE_NAMESPACE = Buffer.from("942dca826d4a52f39b91a2f1e00c1937", "hex");
 export function siteName(project: string, branch: string) {
-  const name = legacySiteName(project, branch);
-  if (name.length <= 63) return name;
-  // The router connects by name, so the entire name must fit in one 63-character DNS label.
-  // Hash the full inputs: slugging or truncating them first could make distinct sites collide.
-  const hash = createHash("sha256").update(JSON.stringify([project, branch])).digest("hex").slice(0, 12);
-  return `${name.slice(0, 50).replace(/-+$/, "")}-${hash}`;
+  // A stable UUIDv5 for the full identity: 41 characters including "site-", within DNS's 63.
+  // Labels carry the readable names and public paths; no slugging or truncation enters the UUID.
+  const bytes = createHash("sha1").update(SITE_NAMESPACE).update(JSON.stringify([project, branch])).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `site-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 const gl = (path: string, method = "GET") => fetch(`${GITLAB}/api/v4/${path}`, { method, headers: { "private-token": TOKEN } });
@@ -54,7 +57,6 @@ export async function removeSite(site: string) {
 
 async function removeLegacySite(project: string, branch: string) {
   const legacy = legacySiteName(project, branch);
-  if (legacy === siteName(project, branch)) return;
   // Old slugs can collide. Only remove an old container labelled as this exact project and branch.
   const labels = await run(["inspect", "--type", "container", "--format", "{{json .Config.Labels}}", legacy])
     .then((out) => JSON.parse(out)).catch(() => undefined);

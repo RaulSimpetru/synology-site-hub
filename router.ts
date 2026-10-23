@@ -49,7 +49,7 @@ export async function listSites(force = false) {
   return cache;
 }
 
-// GitLab's CI_COMMIT_REF_SLUG, as builder.ts names containers: the branch part of the site's path.
+// GitLab's CI_COMMIT_REF_SLUG: the public branch path stays readable, independent of container UUIDs.
 function refSlug(ref: string) {
   return ref.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 63).replace(/^-+|-+$/g, "");
 }

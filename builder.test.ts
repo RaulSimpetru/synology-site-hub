@@ -53,29 +53,27 @@ const push = (project: string, branch: string, after: string) => ({ event_name: 
 const settle = async () => { for (let i = 0; i < 100 && status().some((b) => b.state !== "failed"); i++) await Bun.sleep(20); };
 const log = () => { try { return readFileSync(calls, "utf8"); } catch { return ""; } };
 
-test("short names still match the ones GitLab CI used to make, including the 63-character boundary", () => {
-  expect(siteName("officina-neurale/officina-neurale-website", "deck-look")).toBe("site-officina-neurale-officina-neurale-website-deck-look");
-  expect(siteName("Raul/My_Site", "feature/New UI")).toBe("site-raul-my-site-feature-new-ui");
-  const main = `site-${longProject.replaceAll("/", "-")}-main`;
-  expect(main.length).toBe(63);
-  expect(siteName(longProject, "main")).toBe(main);
+test("site identities use standard UUIDv5 values (verified with Python's uuid.uuid5)", () => {
+  expect(siteName("g/site", "main")).toBe("site-3789bce5-3886-542c-8bc2-5b4ae1373110");
+  expect(siteName(longProject, "develop")).toBe("site-ae249273-8346-5e30-a077-4bb72d3e9dfc");
 });
 
-test("long project and branch names fit a single DNS label and are deterministic", () => {
+test("all project and branch names yield stable 41-character DNS labels", () => {
   expect(legacyName.length).toBe(66);
-  for (const [project, branch] of [[longProject, "mains"], [longProject, "develop"], [longProject, "feat/new-manual"], ["a".repeat(200), "b".repeat(200)]]) {
+  for (const [project, branch] of [["g/site", "main"], [longProject, "main"], [longProject, "mains"], [longProject, "develop"], [longProject, "feat/new-manual"], ["a".repeat(200), "b".repeat(200)], ["組/專案", "改進"]]) {
     const name = siteName(project, branch);
-    expect(name.length).toBeLessThanOrEqual(63);
-    expect(name).toMatch(/^site-[a-z0-9-]+-[a-f0-9]{12}$/);
+    expect(name.length).toBe(41);
+    expect(name).toMatch(/^site-[a-f0-9]{8}-[a-f0-9]{4}-5[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
     expect(siteName(project, branch)).toBe(name);
   }
 });
 
-test("shortened names distinguish full project and branch identities, even when their slugs match", () => {
+test("UUIDs distinguish full project and branch identities, even when their slugs match", () => {
   const prefix = "x".repeat(80);
   const pairs = [[`${prefix}/one`, "develop"], [`${prefix}/two`, "develop"],
     [longProject, `${prefix}/one`], [longProject, `${prefix}/two`],
-    [longProject, "feature/a"], [longProject, "feature-a"], [longProject, "Feature/a"]];
+    [longProject, "feature/a"], [longProject, "feature-a"], [longProject, "Feature/a"],
+    ["a/b", "c"], ["a", "b/c"], ["g/site", "feature/a"], ["g/site", "feature-a"]];
   expect(new Set(pairs.map(([project, branch]) => siteName(project, branch))).size).toBe(pairs.length);
 });
 
@@ -87,12 +85,14 @@ test("everything needs the hook secret", async () => {
 });
 
 test("a push with a Dockerfile builds and runs the site, locked down, with its SITE_ENV_ secrets", async () => {
+  writeFileSync(legacyLabels, JSON.stringify({ "hub.site": "1", "hub.project": "g/site", "hub.branch": "main" }));
   expect((await hook(push("g/site", "main", "a".repeat(40)))).status).toBe(200);
   await Bun.sleep(30);
   await settle();
   const out = log();
-  expect(out).toContain("build --pull -t site-g-site-main");
-  expect(out).toContain("run -d --name site-g-site-main --network sites --restart unless-stopped --memory 1g");
+  const name = siteName("g/site", "main");
+  expect(out).toContain(`build --pull -t ${name}`);
+  expect(out).toContain(`run -d --name ${name} --network sites --restart unless-stopped --memory 1g`);
   expect(out).toContain("--cap-drop ALL --security-opt no-new-privileges");
   expect(out).toContain("--label hub.project=g/site --label hub.branch=main --label hub.commit=aaaaaaaa --label hub.title=Add a page --label hub.author=Alice");
   expect(out).toContain("SMTP_PASS=hunter2");
@@ -100,7 +100,10 @@ test("a push with a Dockerfile builds and runs the site, locked down, with its S
   expect(out.slice(0, out.indexOf("run -d"))).not.toContain("hunter2");
   expect(out).not.toContain(".site.env");
   expect(out).not.toContain("OTHER=");
-  const res = await handle(new Request("http://builder/log/site-g-site-main", { headers: { "x-gitlab-token": "s3cret" } }));
+  expect(out).toContain("rm -f site-g-site-main\n");
+  expect(out.indexOf("rm -f site-g-site-main\n")).toBeGreaterThan(out.indexOf(`run -d --name ${name} `));
+  rmSync(legacyLabels);
+  const res = await handle(new Request(`http://builder/log/${name}`, { headers: { "x-gitlab-token": "s3cret" } }));
   expect(await res.text()).toContain("live");
 });
 
@@ -118,14 +121,14 @@ test("a failed build shows its error until the next push", async () => {
   await Bun.sleep(30);
   await settle();
   const [f] = status();
-  expect(f).toMatchObject({ site: "site-g-site-dev", state: "failed", error: 'error: Could not resolve "three"', title: "Add a page" });
+  expect(f).toMatchObject({ site: siteName("g/site", "dev"), state: "failed", error: 'error: Could not resolve "three"', title: "Add a page" });
 });
 
 test("deleting a branch or the project takes its sites down", async () => {
   writeFileSync(calls, "");
   await hook(push("g/site", "dev", "0".repeat(40)));
   await Bun.sleep(30);
-  expect(log()).toContain("rm -f site-g-site-dev");
+  expect(log()).toContain(`rm -f ${siteName("g/site", "dev")}`);
   expect(status()).toEqual([]);
   writeFileSync(calls, "");
   await hook({ event_name: "project_destroy", path_with_namespace: "g/site" });
